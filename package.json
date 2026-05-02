@@ -1,0 +1,25 @@
+{
+  "name": "shahriyor-assist",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "vercel-build": "node scripts/register-webhook.mjs"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@upstash/qstash": "^2.7.0",
+    "@upstash/redis": "^1.34.0",
+    "lamejs": "^1.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vercel/node": "^5.0.0",
+    "dotenv": "^16.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vercel": "^39.0.0"
+  }
+}
