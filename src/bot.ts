@@ -91,7 +91,10 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
   const chatId = message.chat.id;
 
   if (!userId) return;
-  if (!isAllowed(userId)) return; // jim qolish
+  if (!isAllowed(userId)) {
+    console.log(`⚠️ Bloklangan/Ruxsatsiz foydalanuvchi yozdi: ID=${userId}`);
+    return; // jim qolish
+  }
 
   const text = message.text?.trim();
   const voice = message.voice;
