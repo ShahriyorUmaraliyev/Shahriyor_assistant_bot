@@ -28,7 +28,9 @@ export default async function handler(
   const due = await getDueReminders();
 
   if (!due.length) {
-    res.status(200).json({ sent: 0 });
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ sent: 0 }));
     return;
   }
 
@@ -43,5 +45,7 @@ export default async function handler(
     }
   }
 
-  res.status(200).json({ sent, total: due.length });
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({ sent, total: due.length }));
 }

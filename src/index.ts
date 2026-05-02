@@ -7,7 +7,8 @@ export default async function handler(
   res: VercelResponse
 ): Promise<void> {
   if (req.method !== "POST") {
-    res.status(405).end("Method Not Allowed");
+    res.statusCode = 405;
+    res.end("Method Not Allowed");
     return;
   }
 
@@ -17,7 +18,8 @@ export default async function handler(
     process.env.TELEGRAM_WEBHOOK_SECRET &&
     secret !== process.env.TELEGRAM_WEBHOOK_SECRET
   ) {
-    res.status(403).end("Forbidden");
+    res.statusCode = 403;
+    res.end("Forbidden");
     return;
   }
 
@@ -31,5 +33,6 @@ export default async function handler(
     }
   }
 
-  res.status(200).end("OK");
+  res.statusCode = 200;
+  res.end("OK");
 }
