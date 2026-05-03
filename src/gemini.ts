@@ -28,12 +28,28 @@ function is429(err: unknown): boolean {
   return msg.includes("429") || msg.toLowerCase().includes("too many requests");
 }
 
+function isBillingError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  return lower.includes("prepayment") || lower.includes("credits are depleted") || lower.includes("billing");
+}
+
+export function classifyGeminiError(err: unknown): "billing" | "rate_limit" | "timeout" | "safety" | "unknown" {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (isBillingError(err)) return "billing";
+  if (msg.includes("429") || msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("exhausted")) return "rate_limit";
+  if (msg.includes("GEMINI_TIMEOUT")) return "timeout";
+  if (msg.includes("SAFETY")) return "safety";
+  return "unknown";
+}
+
 export async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      if (is429(err) && attempt < retries) {
+      // Billing xatolarini qayta urinmaslik — ular hech qachon o'z-o'zidan hal bo'lmaydi
+      if (is429(err) && !isBillingError(err) && attempt < retries) {
         await new Promise((r) => setTimeout(r, (attempt + 1) * 2000));
         continue;
       }
