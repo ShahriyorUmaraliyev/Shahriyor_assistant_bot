@@ -1,7 +1,7 @@
 import type { TelegramMessage } from "./types";
 import { getHistory, appendHistory, clearHistory, getUserMode, setUserMode } from "./redis";
 import { getMemory } from "./memory";
-import { generateReply, buildSystemPrompt } from "./gemini";
+import { generateReply, buildSystemPrompt, classifyGeminiError } from "./gemini";
 import { downloadVoice, replyToVoice, textToSpeech } from "./audio";
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -61,18 +61,18 @@ async function sendVoiceMessage(chatId: number, mp3Buffer: Buffer): Promise<void
 // ─── Error messages (O'zbek tili) ─────────────────────────────────────────────
 
 function geminiErrorMessage(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
-  if (msg.includes("GEMINI_TIMEOUT"))
-    return "⏱ Javob olish uzoq vaqt ketdi. Iltimos, qayta yuboring.";
-  if (msg.includes("429") || msg.toLowerCase().includes("quota")) {
-    const isDaily = msg.toLowerCase().includes("exhausted") || msg.toLowerCase().includes("daily");
-    return isDaily
-      ? "⚠️ AI kunlik so'rov limiti tugadi. Ertaga urinib ko'ring yoki Gemini API rejasini yangilang."
-      : "⚠️ AI so'rovlar chegarasiga yetdi. 10-15 soniyadan keyin qayta urinib ko'ring.";
+  switch (classifyGeminiError(err)) {
+    case "billing":
+      return "💳 Gemini API kredit tugagan. Google AI Studio da kredit qo'shing: aistudio.google.com";
+    case "rate_limit":
+      return "⚠️ AI so'rovlar chegarasiga yetdi. 10-15 soniyadan keyin qayta urinib ko'ring.";
+    case "timeout":
+      return "⏱ Javob olish uzoq vaqt ketdi. Iltimos, qayta yuboring.";
+    case "safety":
+      return "🚫 Bu so'rovni bajarib bo'lmadi. Boshqacha so'rab ko'ring.";
+    default:
+      return "❌ Texnik xatolik yuz berdi. Qayta urinib ko'ring.";
   }
-  if (msg.includes("SAFETY"))
-    return "🚫 Bu so'rovni bajarib bo'lmadi. Boshqacha so'rab ko'ring.";
-  return "❌ Texnik xatolik yuz berdi. Qayta urinib ko'ring.";
 }
 
 function audioErrorMessage(err: unknown): string {
