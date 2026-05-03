@@ -3,7 +3,10 @@ import type { UserMemory, ChatMessage } from "./types";
 import { patchMemory } from "./memory";
 import { scheduleReminder } from "./reminder";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+// Gemini API client — lazy
+function getGenAI(): GoogleGenerativeAI {
+  return new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+}
 
 // Vercel limit 30s — Gemini ga 25s beramiz
 export const GEMINI_TIMEOUT_MS = 25_000;
@@ -18,6 +21,26 @@ export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       )
     ),
   ]);
+}
+
+function is429(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes("429") || msg.toLowerCase().includes("too many requests");
+}
+
+export async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (is429(err) && attempt < retries) {
+        await new Promise((r) => setTimeout(r, (attempt + 1) * 2000));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Unreachable");
 }
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
@@ -138,7 +161,7 @@ export async function generateReply(
   memory: UserMemory,
   userId: number
 ): Promise<string> {
-  const model = genAI.getGenerativeModel({
+  const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(memory),
     tools: [
@@ -151,9 +174,8 @@ export async function generateReply(
     history: history.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
   });
 
-  let result = await withTimeout(
-    chat.sendMessage(userText),
-    GEMINI_TIMEOUT_MS
+  let result = await withRetry(() =>
+    withTimeout(chat.sendMessage(userText), GEMINI_TIMEOUT_MS)
   );
 
   let loopCount = 0;
@@ -177,9 +199,8 @@ export async function generateReply(
       }))
     );
 
-    result = await withTimeout(
-      chat.sendMessage(toolResults),
-      GEMINI_TIMEOUT_MS
+    result = await withRetry(() =>
+      withTimeout(chat.sendMessage(toolResults), GEMINI_TIMEOUT_MS)
     );
   }
 

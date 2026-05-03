@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { ChatMessage, UserMemory } from "./types";
-import { updateMemoryTool, setReminderTool, handleTool, withTimeout, GEMINI_TIMEOUT_MS } from "./gemini";
+import { updateMemoryTool, setReminderTool, handleTool, withTimeout, withRetry, GEMINI_TIMEOUT_MS } from "./gemini";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -80,12 +80,14 @@ export async function replyToVoice(
     history: history.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
   });
 
-  let result = await withTimeout(
-    chat.sendMessage([
-      { inlineData: { mimeType: "audio/ogg", data: audioBuffer.toString("base64") } },
-      { text: "Ovozli xabarni eshitib tushun va javob ber. Foydalanuvchi qaysi tilda gapirgan bo'lsa o'sha tilda javob ber." },
-    ]),
-    GEMINI_TIMEOUT_MS
+  let result = await withRetry(() =>
+    withTimeout(
+      chat.sendMessage([
+        { inlineData: { mimeType: "audio/ogg", data: audioBuffer.toString("base64") } },
+        { text: "Ovozli xabarni eshitib tushun va javob ber. Foydalanuvchi qaysi tilda gapirgan bo'lsa o'sha tilda javob ber." },
+      ]),
+      GEMINI_TIMEOUT_MS
+    )
   );
 
   let loopCount = 0;
@@ -105,7 +107,9 @@ export async function replyToVoice(
       }))
     );
 
-    result = await withTimeout(chat.sendMessage(toolResults), GEMINI_TIMEOUT_MS);
+    result = await withRetry(() =>
+      withTimeout(chat.sendMessage(toolResults), GEMINI_TIMEOUT_MS)
+    );
   }
 
   try {

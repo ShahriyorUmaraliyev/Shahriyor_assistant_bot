@@ -64,8 +64,12 @@ function geminiErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.includes("GEMINI_TIMEOUT"))
     return "⏱ Javob olish uzoq vaqt ketdi. Iltimos, qayta yuboring.";
-  if (msg.includes("429") || msg.toLowerCase().includes("quota"))
-    return "⚠️ AI so'rovlar chegarasiga yetdi. Bir ozdan keyin urinib ko'ring.";
+  if (msg.includes("429") || msg.toLowerCase().includes("quota")) {
+    const isDaily = msg.toLowerCase().includes("exhausted") || msg.toLowerCase().includes("daily");
+    return isDaily
+      ? "⚠️ AI kunlik so'rov limiti tugadi. Ertaga urinib ko'ring yoki Gemini API rejasini yangilang."
+      : "⚠️ AI so'rovlar chegarasiga yetdi. 10-15 soniyadan keyin qayta urinib ko'ring.";
+  }
   if (msg.includes("SAFETY"))
     return "🚫 Bu so'rovni bajarib bo'lmadi. Boshqacha so'rab ko'ring.";
   return "❌ Texnik xatolik yuz berdi. Qayta urinib ko'ring.";
