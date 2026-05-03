@@ -25,6 +25,8 @@ export default async function handler(
 
   const update = req.body as TelegramUpdate;
 
+  console.log("DBG body_type:", typeof req.body, "has_message:", !!update?.message, "from_id:", update?.message?.from?.id);
+
   if (update?.message) {
     try {
       await handleMessage(update.message);
