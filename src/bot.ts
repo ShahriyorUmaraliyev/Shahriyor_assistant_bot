@@ -175,7 +175,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
         audioBuffer,
         history,
         memory,
-        buildSystemPrompt(memory)
+        buildSystemPrompt(memory),
+        userId
       );
     } catch (err) {
       console.error("replyToVoice xatosi:", err);
@@ -183,11 +184,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       return;
     }
 
-    // "[Ovozli xabar]" matn sifatida tarixga yoziladi, muvaffaqiyatsizlikka uchrasa reply ni to'xtatmaydi
-    await Promise.all([
-      appendHistory(userId, { role: "user", text: "[Ovozli xabar]", timestamp: Date.now() }).catch(console.error),
-      appendHistory(userId, { role: "model", text: reply, timestamp: Date.now() }).catch(console.error),
-    ]);
+    await appendHistory(userId, { role: "user", text: "[Ovozli xabar]", timestamp: Date.now() }).catch(console.error);
+    await appendHistory(userId, { role: "model", text: reply, timestamp: Date.now() }).catch(console.error);
 
     await deliverReply(chatId, reply, mode);
     return;
@@ -205,10 +203,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       return;
     }
 
-    await Promise.all([
-      appendHistory(userId, { role: "user", text, timestamp: Date.now() }).catch(console.error),
-      appendHistory(userId, { role: "model", text: reply, timestamp: Date.now() }).catch(console.error),
-    ]);
+    await appendHistory(userId, { role: "user", text, timestamp: Date.now() }).catch(console.error);
+    await appendHistory(userId, { role: "model", text: reply, timestamp: Date.now() }).catch(console.error);
 
     await deliverReply(chatId, reply, mode);
   }
