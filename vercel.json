@@ -1,4 +1,5 @@
 {
+  "buildCommand": "npm run vercel-build",
   "functions": {
     "api/**/*.ts": {
       "maxDuration": 30
@@ -6,8 +7,5 @@
   },
   "rewrites": [
     { "source": "/webhook", "destination": "/api/webhook" }
-  ],
-  "crons": [
-    { "path": "/api/reminder", "schedule": "* * * * *" }
   ]
 }

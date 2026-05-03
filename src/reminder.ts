@@ -1,17 +1,32 @@
-import { addReminder } from "./redis";
+import { Client } from "@upstash/qstash";
+
+const APP_URL =
+  process.env.APP_URL?.replace(/\/$/, "") ??
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+
+function getQStash(): Client {
+  return new Client({ token: process.env.QSTASH_TOKEN! });
+}
 
 /**
- * Eslatmani Redis sorted set ga saqlash.
- * Cron job (api/reminder.ts) har daqiqa tekshirib Telegram ga yuboradi.
- *
- * @param userId  Telegram user ID
- * @param text    Eslatma matni
- * @param time    ISO 8601, masalan: "2026-05-03T15:00:00+05:00"
+ * QStash orqali aniq vaqtda eslatma yuborish.
+ * QStash belgilangan vaqtda /api/remind ga POST qiladi.
  */
 export async function scheduleReminder(
   userId: number,
   text: string,
   time: string
 ): Promise<string> {
-  return addReminder(userId, text, time);
+  if (!APP_URL) throw new Error("APP_URL yoki VERCEL_URL sozlanmagan");
+
+  const notBefore = Math.floor(new Date(time).getTime() / 1000);
+  if (isNaN(notBefore)) throw new Error(`Noto'g'ri vaqt formati: ${time}`);
+
+  const result = await getQStash().publishJSON({
+    url: `${APP_URL}/api/remind`,
+    body: { userId, text },
+    notBefore,
+  });
+
+  return result.messageId;
 }

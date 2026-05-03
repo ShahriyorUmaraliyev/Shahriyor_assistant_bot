@@ -23,7 +23,22 @@ export default async function handler(
     return;
   }
 
-  const update = req.body as TelegramUpdate;
+  let update: TelegramUpdate;
+  if (req.body !== undefined && req.body !== null) {
+    update = req.body as TelegramUpdate;
+  } else {
+    const rawBody = await new Promise<string>((resolve, reject) => {
+      let data = "";
+      req.on("data", (chunk) => (data += chunk.toString()));
+      req.on("end", () => resolve(data));
+      req.on("error", reject);
+    });
+    try {
+      update = JSON.parse(rawBody) as TelegramUpdate;
+    } catch {
+      update = {} as TelegramUpdate;
+    }
+  }
 
   if (update?.message) {
     try {
