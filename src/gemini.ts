@@ -61,6 +61,17 @@ export async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
 
+function compactMemory(memory: UserMemory): string {
+  const parts: string[] = [];
+  if (memory.contacts && Object.keys(memory.contacts).length > 0)
+    parts.push(`contacts:${JSON.stringify(memory.contacts)}`);
+  if (memory.products && Object.keys(memory.products).length > 0)
+    parts.push(`products:${JSON.stringify(memory.products)}`);
+  if (memory.notes && (Array.isArray(memory.notes) ? memory.notes.length > 0 : true))
+    parts.push(`notes:${JSON.stringify(memory.notes)}`);
+  return parts.length > 0 ? parts.join("\n") : "(bo'sh)";
+}
+
 export function buildSystemPrompt(memory: UserMemory): string {
   const today = new Date().toLocaleDateString("uz-UZ", {
     timeZone: "Asia/Tashkent",
@@ -70,30 +81,10 @@ export function buildSystemPrompt(memory: UserMemory): string {
     weekday: "long",
   });
 
-  return `Siz Shahriyor Umaraliyevning shaxsiy AI assistantsiz.
-
-KONTEKST:
-- Shahriyor Toshkentda parfyumeriya va kosmetika biznesini yuritadi
-- Kontaktlar, narxlar, buyurtmalar, eslatmalar — biznes ma'lumotlari muhim
-- Bugun: ${today} (Toshkent vaqti, UTC+5)
-
-TIL:
-- Asosan O'ZBEK tilida javob bering
-- Foydalanuvchi rus/ingliz yozsa — o'sha tilda javob bering
-
-USLUB:
-- Qisqa va aniq, ortiqcha gap yo'q
-- Narx hisoblash: chegirma, foiz, solishtirma — barchasini bajaring
-
-JORIY XOTIRA:
-${JSON.stringify(memory, null, 2)}
-
-QOIDALAR:
-- Kontakt/telefon/narx/tavsif aytilsa → update_memory chaqiring
-- "Eslatib qo'y" / vaqt aytilsa → set_reminder chaqiring (ISO 8601, +05:00)
-- "Ertaga" = ertangi sana, "Dushanba" = kelayotgan dushanba
-- Soat aytilmasa: ertalab = 09:00, tushdan keyin = 14:00, kechqurun = 18:00
-- Joriy narx/yangilik/ob-havo → Google Search avtomatik`;
+  return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
+TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
+XOTIRA:\n${compactMemory(memory)}
+QOIDALAR: kontakt/narx/tavsif → update_memory | vaqtli eslatma → set_reminder (ISO 8601 +05:00) | "ertaga"=ertangi kun | soat yo'q: ertalab=09:00, tush=14:00, kech=18:00`;
 }
 
 // ─── Tool Declarations ────────────────────────────────────────────────────────
@@ -171,50 +162,47 @@ export async function handleTool(
 
 // ─── generateReply ────────────────────────────────────────────────────────────
 
+// Har bir history xabarini 500 belgiga cheklash — uzun javoblar token isrof qilmasin
+function trimHistory(history: ChatMessage[]): { role: string; parts: { text: string }[] }[] {
+  return history.map((m) => ({
+    role: m.role,
+    parts: [{ text: m.text.length > 500 ? m.text.slice(0, 500) + "…" : m.text }],
+  }));
+}
+
 export async function generateReply(
   userText: string,
   history: ChatMessage[],
   memory: UserMemory,
   userId: number
 ): Promise<string> {
+  // Xabar uzunligini cheklash — 2000 belgidan oshsa qisqartirish
+  const safeText = userText.length > 2000 ? userText.slice(0, 2000) + "…" : userText;
+
   const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(memory),
-    tools: [
-      { googleSearch: {} } as never,
-      { functionDeclarations: [updateMemoryTool, setReminderTool] },
-    ],
+    // googleSearch olib tashlandi — qidiruv har so'rovda $35/1000 qo'shimcha narx qo'shadi
+    tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool] }],
   });
 
-  const chat = model.startChat({
-    history: history.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
-  });
+  const chat = model.startChat({ history: trimHistory(history) });
 
   let result = await withRetry(() =>
-    withTimeout(chat.sendMessage(userText), GEMINI_TIMEOUT_MS)
+    withTimeout(chat.sendMessage(safeText), GEMINI_TIMEOUT_MS)
   );
 
-  let loopCount = 0;
-  while (loopCount < 3) {
-    loopCount++;
-    const calls = result.response.functionCalls();
-    if (!calls?.length) break;
-
+  // Tool loop: max 1 marta — shaxsiy assistant uchun 1 tool call yetarli
+  const calls = result.response.functionCalls();
+  if (calls?.length) {
     const toolResults = await Promise.all(
       calls.map(async (call) => ({
         functionResponse: {
           name: call.name,
-          response: {
-            result: await handleTool(
-              call.name,
-              call.args as Record<string, unknown>,
-              userId
-            ),
-          },
+          response: { result: await handleTool(call.name, call.args as Record<string, unknown>, userId) },
         },
       }))
     );
-
     result = await withRetry(() =>
       withTimeout(chat.sendMessage(toolResults), GEMINI_TIMEOUT_MS)
     );
@@ -222,7 +210,7 @@ export async function generateReply(
 
   try {
     return result.response.text() || "Bajarildi.";
-  } catch (err) {
+  } catch {
     return "Vazifa bajarildi, lekin matnli javob yaratilmadi.";
   }
 }

@@ -16,7 +16,7 @@ function getRedis(): Redis {
 
 // ─── Chat History ─────────────────────────────────────────────────────────────
 
-const HISTORY_LIMIT = 20;
+const HISTORY_LIMIT = 10;
 const historyKey = (userId: number) => `chat:${userId}:history`;
 
 export async function getHistory(userId: number): Promise<ChatMessage[]> {

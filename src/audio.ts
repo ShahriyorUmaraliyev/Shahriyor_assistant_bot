@@ -90,23 +90,17 @@ export async function replyToVoice(
     )
   );
 
-  let loopCount = 0;
-  while (loopCount < 3) {
-    loopCount++;
-    const calls = result.response.functionCalls();
-    if (!calls?.length) break;
-
+  // Tool loop: max 1 marta
+  const calls = result.response.functionCalls();
+  if (calls?.length) {
     const toolResults = await Promise.all(
       calls.map(async (call) => ({
         functionResponse: {
           name: call.name,
-          response: {
-            result: await handleTool(call.name, call.args as Record<string, unknown>, userId),
-          },
+          response: { result: await handleTool(call.name, call.args as Record<string, unknown>, userId) },
         },
       }))
     );
-
     result = await withRetry(() =>
       withTimeout(chat.sendMessage(toolResults), GEMINI_TIMEOUT_MS)
     );
