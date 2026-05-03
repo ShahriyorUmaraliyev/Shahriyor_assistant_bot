@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { ChatMessage, UserMemory } from "./types";
+import { updateMemoryTool, setReminderTool, handleTool, withTimeout, GEMINI_TIMEOUT_MS } from "./gemini";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -66,29 +67,58 @@ export async function replyToVoice(
   audioBuffer: Buffer,
   history: ChatMessage[],
   memory: UserMemory,
-  systemPrompt: string
+  systemPrompt: string,
+  userId: number
 ): Promise<string> {
   const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: systemPrompt,
+    tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool] }],
   });
 
   const chat = model.startChat({
     history: history.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
   });
 
-  const result = await chat.sendMessage([
-    { inlineData: { mimeType: "audio/ogg", data: audioBuffer.toString("base64") } },
-    { text: "Ovozli xabarni eshitib tushun va javob ber. Foydalanuvchi qaysi tilda gapirgan bo'lsa o'sha tilda javob ber." },
-  ]);
+  let result = await withTimeout(
+    chat.sendMessage([
+      { inlineData: { mimeType: "audio/ogg", data: audioBuffer.toString("base64") } },
+      { text: "Ovozli xabarni eshitib tushun va javob ber. Foydalanuvchi qaysi tilda gapirgan bo'lsa o'sha tilda javob ber." },
+    ]),
+    GEMINI_TIMEOUT_MS
+  );
 
-  return result.response.text();
+  let loopCount = 0;
+  while (loopCount < 3) {
+    loopCount++;
+    const calls = result.response.functionCalls();
+    if (!calls?.length) break;
+
+    const toolResults = await Promise.all(
+      calls.map(async (call) => ({
+        functionResponse: {
+          name: call.name,
+          response: {
+            result: await handleTool(call.name, call.args as Record<string, unknown>, userId),
+          },
+        },
+      }))
+    );
+
+    result = await withTimeout(chat.sendMessage(toolResults), GEMINI_TIMEOUT_MS);
+  }
+
+  try {
+    return result.response.text() || "Bajarildi.";
+  } catch {
+    return "Vazifa bajarildi, lekin matnli javob yaratilmadi.";
+  }
 }
 
 // ─── 3. Audio Output: Matn → Gemini TTS → MP3 ────────────────────────────────
 
 export async function textToSpeech(text: string): Promise<Buffer> {
-  const model = getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = getGenAI().getGenerativeModel({ model: "gemini-2.5-flash-preview-tts" });
 
   // responseModalities SDK typingda yo'q — any orqali yuboramiz
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

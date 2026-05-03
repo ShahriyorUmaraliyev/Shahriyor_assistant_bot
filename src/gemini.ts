@@ -6,9 +6,9 @@ import { scheduleReminder } from "./reminder";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 // Vercel limit 30s — Gemini ga 25s beramiz
-const GEMINI_TIMEOUT_MS = 25_000;
+export const GEMINI_TIMEOUT_MS = 25_000;
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
     promise,
     new Promise<never>((_, reject) =>
@@ -59,7 +59,7 @@ QOIDALAR:
 
 // ─── Tool Declarations ────────────────────────────────────────────────────────
 
-const updateMemoryTool = {
+export const updateMemoryTool = {
   name: "update_memory",
   description:
     "Kontakt, mahsulot narxi yoki muhim ma'lumotni doimiy xotiraga yozish. " +
@@ -83,7 +83,7 @@ const updateMemoryTool = {
   },
 };
 
-const setReminderTool = {
+export const setReminderTool = {
   name: "set_reminder",
   description:
     "Telegram orqali aniq vaqtda eslatma yuborish. " +
@@ -106,7 +106,7 @@ const setReminderTool = {
 
 // ─── Function Call Handler ────────────────────────────────────────────────────
 
-async function handleTool(
+export async function handleTool(
   name: string,
   args: Record<string, unknown>,
   userId: number
