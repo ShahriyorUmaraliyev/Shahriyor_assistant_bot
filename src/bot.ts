@@ -1,8 +1,8 @@
 import type { TelegramMessage } from "./types";
 import { getHistory, saveHistory, clearHistory, getUserMode, setUserMode } from "./redis";
 import { getMemory } from "./memory";
-import { generateReply, buildSystemPrompt, classifyGeminiError } from "./gemini";
-import { downloadVoice, replyToVoice, textToSpeech } from "./audio";
+import { generateReply, classifyGeminiError } from "./gemini";
+import { downloadVoice, transcribeVoice, textToSpeech } from "./audio";
 import { hasSession } from "./userclient";
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -115,6 +115,8 @@ function audioErrorMessage(err: unknown): string {
     return "⏱ Audio yuklab olishda vaqt tugadi (10 sek). Qayta urinib ko'ring.";
   if (msg.includes("TELEGRAM_FILE_ERROR"))
     return "❌ Telegram faylni topib bo'lmadi. Qayta yuboring.";
+  if (msg.includes("VOICE_TRANSCRIPTION_FAILED"))
+    return "🎤 Ovozni matnga aylantirib bo'lmadi. Qayta urinib ko'ring.";
   if (msg.includes("TTS_NO_AUDIO"))
     return "🔇 Ovozli javob yaratib bo'lmadi. Matn rejimiga o'tildi.";
   return "❌ Audio qayta ishlashda xatolik. Qayta urinib ko'ring.";
@@ -222,24 +224,30 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       return;
     }
 
+    // 1-qadam: audio → matn (tools yo'q, oddiy generateContent)
+    let transcribed: string;
+    try {
+      transcribed = await transcribeVoice(audioBuffer);
+    } catch (err) {
+      console.error("Transcription xatosi:", err);
+      await sendMessage(chatId, audioErrorMessage(err));
+      return;
+    }
+
+    // 2-qadam: transcribed matn → javob (xuddi matnli xabar kabi, tools bilan)
     let reply: string;
     try {
-      reply = await replyToVoice(
-        audioBuffer,
-        history,
-        memory,
-        buildSystemPrompt(memory),
-        userId
-      );
+      reply = await generateReply(transcribed, history, memory, userId);
     } catch (err) {
-      console.error("replyToVoice xatosi:", err);
+      console.error("generateReply (voice) xatosi:", err);
       await sendMessage(chatId, geminiErrorMessage(err));
       return;
     }
 
+    // Tarixda actual matn saqlanadi — keyingi suhbatda context to'g'ri bo'ladi
     await saveHistory(userId, [
       ...history,
-      { role: "user", text: "[Ovozli xabar]", timestamp: Date.now() },
+      { role: "user", text: `🎤 ${transcribed}`, timestamp: Date.now() },
       { role: "model", text: reply, timestamp: Date.now() },
     ]).catch(console.error);
 

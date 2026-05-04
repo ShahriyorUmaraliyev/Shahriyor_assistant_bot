@@ -1,6 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { ChatMessage, UserMemory } from "./types";
-import { updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool, handleTool, withTimeout, withRetry, GEMINI_TIMEOUT_MS } from "./gemini";
+import { withTimeout, withRetry, GEMINI_TIMEOUT_MS } from "./gemini";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -68,65 +67,31 @@ export async function downloadVoice(
   return Buffer.from(await dlRes.arrayBuffer());
 }
 
-// ─── 2. Audio Input: OGG → Gemini multimodal → javob ─────────────────────────
+// ─── 2. Audio Input: OGG → matn (transcription) ──────────────────────────────
+// generateContent() ishlatiladi — startChat()+tools+audio kombinatsiyasi
+// Gemini API da ishonchsiz: model audio'ni ko'rmay "tushuna olmayman" deydi.
 
-export async function replyToVoice(
-  audioBuffer: Buffer,
-  history: ChatMessage[],
-  memory: UserMemory,
-  systemPrompt: string,
-  userId: number
-): Promise<string> {
-  // Audio qayta ishlash uchun thinkingBudget o'chirilmaydi —
-  // thinkingBudget:0 multimodal audio ni tushunishga to'sqinlik qiladi
-  const model = getGenAI().getGenerativeModel({
-    model: "gemini-2.5-flash",
-    systemInstruction: systemPrompt,
-    tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool] }],
-  });
-
-  // Ovozli xabar o'zi kontekst beradi — oxirgi 4 xabar yetarli (token tejash)
-  const trimmedHistory = history.slice(-4).map((m) => ({
-    role: m.role,
-    parts: [{ text: m.text.length > 500 ? m.text.slice(0, 500) + "…" : m.text }],
-  }));
-  const chat = model.startChat({ history: trimmedHistory });
-
-  let result = await withRetry(() =>
+export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
+  const model = getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+  const result = await withRetry(() =>
     withTimeout(
-      chat.sendMessage([
-        { inlineData: { mimeType: "audio/ogg", data: audioBuffer.toString("base64") } },
-        { text: "Foydalanuvchi ovozli xabar yubordi. Ovozni eshit, tushun va javob ber. Hech qachon 'ovozni tushuna olmayman' dema — ovozli xabarlarni qayta ishlash qobiliyating bor. Foydalanuvchi qaysi tilda gapirgan bo'lsa o'sha tilda javob ber." },
+      model.generateContent([
+        {
+          inlineData: {
+            mimeType: "audio/ogg",
+            data: audioBuffer.toString("base64"),
+          },
+        },
+        {
+          text: "Bu ovozli xabardagi so'zlarni aniq ko'chir. Faqat aytilgan so'zlarni yoz, hech qanday izoh yoki qo'shimcha qo'shma.",
+        },
       ]),
       GEMINI_TIMEOUT_MS
     )
   );
-
-  // Tool loop: max 1 marta
-  const calls = result.response.functionCalls();
-  if (calls?.length) {
-    const toolResults = await Promise.all(
-      calls.map(async (call) => {
-        let toolResult: string;
-        try {
-          toolResult = await handleTool(call.name, call.args as Record<string, unknown>, userId);
-        } catch (err) {
-          console.error(`Tool "${call.name}" xatosi:`, err);
-          toolResult = `Xatolik: ${err instanceof Error ? err.message : String(err)}`;
-        }
-        return { functionResponse: { name: call.name, response: { result: toolResult } } };
-      })
-    );
-    result = await withRetry(() =>
-      withTimeout(chat.sendMessage(toolResults), GEMINI_TIMEOUT_MS)
-    );
-  }
-
-  try {
-    return result.response.text() || "Bajarildi.";
-  } catch {
-    return "Vazifa bajarildi, lekin matnli javob yaratilmadi.";
-  }
+  const text = result.response.text().trim();
+  if (!text) throw new Error("VOICE_TRANSCRIPTION_FAILED");
+  return text;
 }
 
 // ─── 3. Audio Output: Matn → Gemini TTS → MP3 ────────────────────────────────
