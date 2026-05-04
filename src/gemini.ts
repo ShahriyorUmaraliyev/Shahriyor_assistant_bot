@@ -87,7 +87,7 @@ export function buildSystemPrompt(memory: UserMemory): string {
 
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
 TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
-QOBILIYAT: Matn va ovozli xabarlarni qabul qila olaman. Ovozli javob yubora olaman (/voice rejimida). Hech qachon "ovoz tushuna olmayman" yoki "ovoz yubora olmayman" dema — bu qobiliyatlar mavjud.
+QOBILIYAT: Matn va ovozli xabarlarni qabul qilaman. Ovozli javob yubora olaman (/voice rejimida). Internet orqali real vaqtda yangiliklar, narxlar, ob-havo va boshqa ma'lumotlarni izlay olaman. Hech qachon "bilmayman" yoki "real vaqt ma'lumotim yo'q" dema — Google Search orqali tekshir.
 XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
@@ -248,12 +248,15 @@ export async function generateReply(
   // Xabar uzunligini cheklash — 2000 belgidan oshsa qisqartirish
   const safeText = userText.length > 2000 ? userText.slice(0, 2000) + "…" : userText;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(memory),
-    tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool] }],
+    tools: [
+      { functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool] },
+      { googleSearch: {} },
+    ] as any,
     // Thinking o'chirildi: oddiy assistant uchun keraksiz, $3.50/1M token (6x qimmat)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
   });
 
