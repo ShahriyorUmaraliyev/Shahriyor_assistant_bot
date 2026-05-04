@@ -3,9 +3,11 @@ import type { UserMemory, ChatMessage } from "./types";
 import { patchMemory } from "./memory";
 import { scheduleReminder } from "./reminder";
 
-// Gemini API client — lazy
+// Gemini API client — lazy singleton
+let _genAI: GoogleGenerativeAI | null = null;
 function getGenAI(): GoogleGenerativeAI {
-  return new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+  if (!_genAI) _genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+  return _genAI;
 }
 
 // Vercel limit 30s — Gemini ga 25s beramiz

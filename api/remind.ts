@@ -29,23 +29,43 @@ export default async function handler(
     return;
   }
 
-  // QStash signature tekshiruvi
+  // @vercel/node v5: req.body undefined bo'lishi mumkin — raw stream o'qish
+  let rawBody: string;
+  if (req.body !== undefined && req.body !== null) {
+    rawBody = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+  } else {
+    rawBody = await new Promise<string>((resolve, reject) => {
+      let data = "";
+      req.on("data", (chunk) => (data += chunk.toString()));
+      req.on("end", () => resolve(data));
+      req.on("error", reject);
+    });
+  }
+
+  // QStash signature tekshiruvi — raw body bilan (parse qilmasdan oldin)
   const signingKey = process.env.QSTASH_CURRENT_SIGNING_KEY;
   const nextKey = process.env.QSTASH_NEXT_SIGNING_KEY;
 
   if (signingKey && nextKey) {
     const receiver = new Receiver({ currentSigningKey: signingKey, nextSigningKey: nextKey });
-    const body = JSON.stringify(req.body);
     const signature = req.headers["upstash-signature"] as string;
     try {
-      await receiver.verify({ signature, body });
+      await receiver.verify({ signature, body: rawBody });
     } catch {
       res.status(401).end("Unauthorized");
       return;
     }
   }
 
-  const { userId, text } = req.body as ReminderPayload;
+  let payload: ReminderPayload;
+  try {
+    payload = JSON.parse(rawBody) as ReminderPayload;
+  } catch {
+    res.status(400).end("Bad Request: invalid JSON");
+    return;
+  }
+
+  const { userId, text } = payload;
 
   if (!userId || !text) {
     res.status(400).end("Bad Request");
