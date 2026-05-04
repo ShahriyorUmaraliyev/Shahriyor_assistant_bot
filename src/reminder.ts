@@ -4,14 +4,13 @@ const APP_URL =
   process.env.APP_URL?.replace(/\/$/, "") ??
   (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
 
+// Lazy singleton — har chaqiruvda yangi Client yaratmaslik
+let _qstash: Client | null = null;
 function getQStash(): Client {
-  return new Client({ token: process.env.QSTASH_TOKEN! });
+  if (!_qstash) _qstash = new Client({ token: process.env.QSTASH_TOKEN! });
+  return _qstash;
 }
 
-/**
- * QStash orqali aniq vaqtda eslatma yuborish.
- * QStash belgilangan vaqtda /api/remind ga POST qiladi.
- */
 export async function scheduleReminder(
   userId: number,
   text: string,
@@ -22,10 +21,14 @@ export async function scheduleReminder(
   const notBefore = Math.floor(new Date(time).getTime() / 1000);
   if (isNaN(notBefore)) throw new Error(`Noto'g'ri vaqt formati: ${time}`);
 
+  // O'tgan vaqtni oldini olish — kamida 60 soniya kelajakda bo'lsin
+  const minTime = Math.floor(Date.now() / 1000) + 60;
+  const safeNotBefore = Math.max(notBefore, minTime);
+
   const result = await getQStash().publishJSON({
     url: `${APP_URL}/api/remind`,
     body: { userId, text },
-    notBefore,
+    notBefore: safeNotBefore,
   });
 
   return result.messageId;
