@@ -2,6 +2,7 @@ import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import type { UserMemory, ChatMessage } from "./types";
 import { patchMemory } from "./memory";
 import { scheduleReminder } from "./reminder";
+import { getCurrentWeather } from "./weather";
 
 // Gemini API client — lazy singleton
 let _genAI: GoogleGenerativeAI | null = null;
@@ -136,6 +137,23 @@ export const setReminderTool = {
   },
 };
 
+export const getWeatherTool = {
+  name: "get_weather",
+  description:
+    "Shahar ob-havosini real vaqtda olish. Foydalanuvchi ob-havo, harorat, " +
+    "yog'ingarchlik, shamol haqida so'raganda chaqiring.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      city: {
+        type: SchemaType.STRING,
+        description: 'Shahar nomi inglizcha. Misol: "Tashkent", "Moscow", "Dubai"',
+      },
+    },
+    required: ["city"],
+  },
+};
+
 // ─── Function Call Handler ────────────────────────────────────────────────────
 
 export async function handleTool(
@@ -158,6 +176,10 @@ export async function handleTool(
     const { text, time } = args as { text: string; time: string };
     const id = await scheduleReminder(userId, text, time);
     return `Eslatma rejalashtirildi (id: ${id}).`;
+  }
+  if (name === "get_weather") {
+    const { city } = args as { city: string };
+    return await getCurrentWeather(city);
   }
   return "Noma'lum funksiya.";
 }
@@ -184,7 +206,7 @@ export async function generateReply(
   const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(memory),
-    tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool] }],
+    tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool] }],
     // Thinking o'chirildi: oddiy assistant uchun keraksiz, $3.50/1M token (6x qimmat)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
