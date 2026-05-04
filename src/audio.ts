@@ -68,12 +68,12 @@ export async function downloadVoice(
 }
 
 // ─── 2. Audio Input: OGG → matn (transcription) ──────────────────────────────
-// gemini-1.5-flash: audio inlineData uchun sinovdan o'tgan, ishonchli model.
-// gemini-2.5-flash generateContent+audio ni rad etishi mumkin ("aylantira olmayman").
-// contents struktura explicit — Part[] short-form bilan model audio'ni o'tkazib yuboradi.
+// gemini-2.0-flash: audio input uchun ishonchli, gemini-1.5-flash deprecated.
+// generateContent() — startChat()+tools+audio kombinatsiyasidan farqli ishonchli.
+// contents explicit — Part[] shorthand bilan audio SDK tomonidan o'tkazib yuboriladi.
 
 export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
-  const model = getGenAI().getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" });
   const result = await withRetry(() =>
     withTimeout(
       model.generateContent({

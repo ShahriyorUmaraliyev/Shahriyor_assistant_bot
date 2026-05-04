@@ -109,17 +109,26 @@ function geminiErrorMessage(err: unknown): string {
 
 function audioErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
+  console.error("[audioError] raw:", msg); // Vercel logda ko'rish uchun
   if (msg.includes("AUDIO_TOO_LARGE"))
     return "📦 Audio fayl 20 MB dan katta. Qisqaroq xabar yuboring.";
   if (msg.includes("AUDIO_DOWNLOAD_TIMEOUT"))
-    return "⏱ Audio yuklab olishda vaqt tugadi (10 sek). Qayta urinib ko'ring.";
+    return "⏱ Audio yuklab olishda vaqt tugadi. Qayta urinib ko'ring.";
   if (msg.includes("TELEGRAM_FILE_ERROR"))
     return "❌ Telegram faylni topib bo'lmadi. Qayta yuboring.";
   if (msg.includes("VOICE_TRANSCRIPTION_FAILED"))
     return "🎤 Ovozni matnga aylantirib bo'lmadi. Qayta urinib ko'ring.";
   if (msg.includes("TTS_NO_AUDIO"))
     return "🔇 Ovozli javob yaratib bo'lmadi. Matn rejimiga o'tildi.";
-  return "❌ Audio qayta ishlashda xatolik. Qayta urinib ko'ring.";
+  if (msg.includes("GEMINI_TIMEOUT"))
+    return "⏱ AI javob berishda vaqt tugadi (25 sek). Qayta urinib ko'ring.";
+  if (msg.includes("404") || msg.includes("not found") || msg.includes("NOT_FOUND"))
+    return "❌ AI modeli topilmadi. Dastur xatoligi — admin xabardor qilindi.";
+  if (msg.includes("429") || msg.includes("quota") || msg.includes("RESOURCE_EXHAUSTED"))
+    return "⚠️ AI so'rovlar chegarasiga yetdi. 10-15 soniyadan keyin qayta urinib ko'ring.";
+  if (msg.includes("TELEGRAM_TIMEOUT"))
+    return "⏱ Telegram server javob bermadi. Qayta urinib ko'ring.";
+  return `❌ Audio xatolik: ${msg.slice(0, 80)}`;
 }
 
 // ─── Message Handler ──────────────────────────────────────────────────────────
