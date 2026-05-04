@@ -84,7 +84,7 @@ server.listen(PORT, () => {
   console.log("\n🚀 Local server ishga tushdi:");
   console.log(`   http://localhost:${PORT}/webhook\n`);
   console.log("📡 Tunnel uchun yangi terminalda:");
-  console.log("   npx localtunnel --port ${PORT}\n");
+  console.log(`   npx localtunnel --port ${PORT}\n`);
   console.log("📋 Webhook ro'yxatga olish (tunnel URL bilan):");
   console.log(`   curl -X POST "https://api.telegram.org/bot${
     process.env.TELEGRAM_BOT_TOKEN?.slice(0, 20)

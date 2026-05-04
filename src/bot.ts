@@ -20,16 +20,33 @@ function isAllowed(userId: number): boolean {
 
 // ─── Telegram API helpers ─────────────────────────────────────────────────────
 
-const TG = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+if (!BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN sozlanmagan");
+const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
+
+const TG_TIMEOUT_MS = 8_000; // Telegram API uchun 8 soniya yetarli
+
+async function tgFetch(url: string, init: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TG_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") throw new Error("TELEGRAM_TIMEOUT");
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export async function sendMessage(chatId: number, text: string): Promise<void> {
-  let res = await fetch(`${TG}/sendMessage`, {
+  let res = await tgFetch(`${TG}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
   });
   if (!res.ok) {
-    res = await fetch(`${TG}/sendMessage`, {
+    res = await tgFetch(`${TG}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text }),
@@ -41,11 +58,11 @@ export async function sendMessage(chatId: number, text: string): Promise<void> {
 }
 
 async function sendTyping(chatId: number): Promise<void> {
-  await fetch(`${TG}/sendChatAction`, {
+  await tgFetch(`${TG}/sendChatAction`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, action: "typing" }),
-  });
+  }).catch(() => {}); // typing xatosi kritik emas
 }
 
 async function sendVoiceMessage(chatId: number, mp3Buffer: Buffer): Promise<void> {
@@ -56,7 +73,21 @@ async function sendVoiceMessage(chatId: number, mp3Buffer: Buffer): Promise<void
     new Blob([mp3Buffer], { type: "audio/mpeg" }),
     "reply.mp3"
   );
-  await fetch(`${TG}/sendVoice`, { method: "POST", body: form });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15_000); // fayl yuklash uchun 15 sek
+  try {
+    const res = await fetch(`${TG}/sendVoice`, {
+      method: "POST",
+      body: form,
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`Telegram sendVoice xatosi: ${res.status}`);
+  } catch (err) {
+    if ((err as Error).name === "AbortError") throw new Error("TELEGRAM_TIMEOUT");
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ─── Error messages (O'zbek tili) ─────────────────────────────────────────────

@@ -55,6 +55,8 @@ export default async function handler(
       res.status(401).end("Unauthorized");
       return;
     }
+  } else {
+    console.warn("⚠️ QSTASH_CURRENT_SIGNING_KEY yoki QSTASH_NEXT_SIGNING_KEY sozlanmagan — /api/remind himoyasiz!");
   }
 
   let payload: ReminderPayload;

@@ -71,7 +71,7 @@ function compactMemory(memory: UserMemory): string {
     parts.push(`contacts:${JSON.stringify(memory.contacts)}`);
   if (memory.products && Object.keys(memory.products).length > 0)
     parts.push(`products:${JSON.stringify(memory.products)}`);
-  if (memory.notes && (Array.isArray(memory.notes) ? memory.notes.length > 0 : true))
+  if (memory.notes && memory.notes.length > 0)
     parts.push(`notes:${JSON.stringify(memory.notes)}`);
   return parts.length > 0 ? parts.join("\n") : "(bo'sh)";
 }
@@ -87,6 +87,7 @@ export function buildSystemPrompt(memory: UserMemory): string {
 
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
 TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
+QOBILIYAT: Matn va ovozli xabarlarni qabul qila olaman. Ovozli javob yubora olaman (/voice rejimida). Hech qachon "ovoz tushuna olmayman" yoki "ovoz yubora olmayman" dema — bu qobiliyatlar mavjud.
 XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory

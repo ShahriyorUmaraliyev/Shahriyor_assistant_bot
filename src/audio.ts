@@ -6,7 +6,10 @@ import { updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool, han
 
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024; // 20 MB
 const DOWNLOAD_TIMEOUT_MS = 10_000;       // 10 sekund
-const TG = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
+
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+if (!BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN sozlanmagan");
+const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 // ─── Lazy Gemini ──────────────────────────────────────────────────────────────
 
@@ -44,6 +47,8 @@ export async function downloadVoice(
     DOWNLOAD_TIMEOUT_MS
   );
 
+  if (!infoRes.ok) throw new Error("TELEGRAM_FILE_ERROR");
+
   const info = (await infoRes.json()) as {
     ok: boolean;
     result: { file_path: string; file_size?: number };
@@ -54,9 +59,11 @@ export async function downloadVoice(
     throw new Error("AUDIO_TOO_LARGE");
 
   const dlRes = await fetchWithTimeout(
-    `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${info.result.file_path}`,
+    `https://api.telegram.org/file/bot${BOT_TOKEN}/${info.result.file_path}`,
     DOWNLOAD_TIMEOUT_MS
   );
+
+  if (!dlRes.ok) throw new Error("TELEGRAM_FILE_ERROR");
 
   return Buffer.from(await dlRes.arrayBuffer());
 }
@@ -70,13 +77,12 @@ export async function replyToVoice(
   systemPrompt: string,
   userId: number
 ): Promise<string> {
+  // Audio qayta ishlash uchun thinkingBudget o'chirilmaydi —
+  // thinkingBudget:0 multimodal audio ni tushunishga to'sqinlik qiladi
   const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: systemPrompt,
     tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool] }],
-    // Thinking o'chirildi: oddiy assistant uchun keraksiz, $3.50/1M token (6x qimmat)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
   });
 
   // Ovozli xabar o'zi kontekst beradi — oxirgi 4 xabar yetarli (token tejash)
@@ -90,7 +96,7 @@ export async function replyToVoice(
     withTimeout(
       chat.sendMessage([
         { inlineData: { mimeType: "audio/ogg", data: audioBuffer.toString("base64") } },
-        { text: "Ovozli xabarni eshitib tushun va javob ber. Foydalanuvchi qaysi tilda gapirgan bo'lsa o'sha tilda javob ber." },
+        { text: "Foydalanuvchi ovozli xabar yubordi. Ovozni eshit, tushun va javob ber. Hech qachon 'ovozni tushuna olmayman' dema — ovozli xabarlarni qayta ishlash qobiliyating bor. Foydalanuvchi qaysi tilda gapirgan bo'lsa o'sha tilda javob ber." },
       ]),
       GEMINI_TIMEOUT_MS
     )
@@ -131,15 +137,18 @@ export async function textToSpeech(text: string): Promise<Buffer> {
   // responseModalities SDK typingda yo'q — any orqali yuboramiz
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const generateFn = model.generateContent.bind(model) as (req: any) => Promise<any>;
-  const result = await generateFn({
-    contents: [{ role: "user", parts: [{ text }] }],
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-      speechConfig: {
-        voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
+  const result = await withTimeout(
+    generateFn({
+      contents: [{ role: "user", parts: [{ text }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
+        },
       },
-    },
-  });
+    }),
+    GEMINI_TIMEOUT_MS
+  );
 
   const data: string | undefined =
     result?.response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
