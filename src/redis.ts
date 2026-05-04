@@ -36,6 +36,11 @@ export async function clearHistory(userId: number): Promise<void> {
   await getRedis().del(historyKey(userId));
 }
 
+export async function saveHistory(userId: number, messages: ChatMessage[]): Promise<void> {
+  const trimmed = messages.slice(-HISTORY_LIMIT);
+  await getRedis().set(historyKey(userId), trimmed, { ex: 60 * 60 * 24 * 7 });
+}
+
 // ─── User Mode (voice / text) ─────────────────────────────────────────────────
 
 const modeKey = (userId: number) => `user:${userId}:mode`;
