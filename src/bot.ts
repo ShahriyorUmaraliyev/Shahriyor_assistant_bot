@@ -285,6 +285,12 @@ async function handleAuthStep(
 
   if (state.step === "waiting_code") {
     const code = text.trim().replace(/\s/g, "");
+    // partialSession yo'q = eski auth state (fix oldin yaratilgan) → qaytadan boshlash kerak
+    if (!state.partialSession) {
+      await clearAuthState(userId);
+      await sendMessage(chatId, "⚠️ Sessiya eskirgan. Qaytadan /auth\\_tg bosing.");
+      return;
+    }
     try {
       const result = await verifyCode(userId, state.phone, state.phoneCodeHash, code, state.partialSession);
       if (result === "done") {
@@ -294,7 +300,12 @@ async function handleAuthStep(
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await sendMessage(chatId, `❌ Kod noto'g'ri: ${msg}\nQayta urinib ko'ring:`);
+      if (msg.includes("PHONE_CODE_EXPIRED") || msg.includes("PHONECODEEXPIRED")) {
+        await clearAuthState(userId);
+        await sendMessage(chatId, "⏱ Kod muddati o'tdi. Qaytadan /auth\\_tg bosing (kodni tezroq kiriting).");
+      } else {
+        await sendMessage(chatId, `❌ Kod noto'g'ri: ${msg}\nQayta urinib ko'ring:`);
+      }
     }
     return;
   }
