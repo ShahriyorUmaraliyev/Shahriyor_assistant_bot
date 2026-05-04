@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { ChatMessage, UserMemory } from "./types";
-import { updateMemoryTool, setReminderTool, handleTool, withTimeout, withRetry, GEMINI_TIMEOUT_MS } from "./gemini";
+import { updateMemoryTool, setReminderTool, getWeatherTool, handleTool, withTimeout, withRetry, GEMINI_TIMEOUT_MS } from "./gemini";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ export async function replyToVoice(
   const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: systemPrompt,
-    tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool] }],
+    tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool] }],
     // Thinking o'chirildi: oddiy assistant uchun keraksiz, $3.50/1M token (6x qimmat)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
