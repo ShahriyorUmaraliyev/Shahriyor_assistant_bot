@@ -286,7 +286,7 @@ async function handleAuthStep(
   if (state.step === "waiting_code") {
     const code = text.trim().replace(/\s/g, "");
     try {
-      const result = await verifyCode(userId, state.phone, state.phoneCodeHash, code);
+      const result = await verifyCode(userId, state.phone, state.phoneCodeHash, code, state.partialSession);
       if (result === "done") {
         await sendMessage(chatId, "✅ Telegram hisobi muvaffaqiyatli ulandi!\nEndi kontaktlarga xabar yuborishingizni ayta olaman.");
       } else {
