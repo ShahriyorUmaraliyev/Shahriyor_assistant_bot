@@ -184,8 +184,10 @@ export async function generateReply(
   const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(memory),
-    // googleSearch olib tashlandi — qidiruv har so'rovda $35/1000 qo'shimcha narx qo'shadi
     tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool] }],
+    // Thinking o'chirildi: oddiy assistant uchun keraksiz, $3.50/1M token (6x qimmat)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
   });
 
   const chat = model.startChat({ history: trimHistory(history) });

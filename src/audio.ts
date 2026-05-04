@@ -74,6 +74,9 @@ export async function replyToVoice(
     model: "gemini-2.5-flash",
     systemInstruction: systemPrompt,
     tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool] }],
+    // Thinking o'chirildi: oddiy assistant uchun keraksiz, $3.50/1M token (6x qimmat)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
   });
 
   // Ovozli xabar o'zi kontekst beradi — oxirgi 4 xabar yetarli (token tejash)

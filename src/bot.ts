@@ -1,5 +1,5 @@
 import type { TelegramMessage } from "./types";
-import { getHistory, appendHistory, clearHistory, getUserMode, setUserMode } from "./redis";
+import { getHistory, saveHistory, clearHistory, getUserMode, setUserMode } from "./redis";
 import { getMemory } from "./memory";
 import { generateReply, buildSystemPrompt, classifyGeminiError } from "./gemini";
 import { downloadVoice, replyToVoice, textToSpeech } from "./audio";
@@ -188,8 +188,11 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       return;
     }
 
-    await appendHistory(userId, { role: "user", text: "[Ovozli xabar]", timestamp: Date.now() }).catch(console.error);
-    await appendHistory(userId, { role: "model", text: reply, timestamp: Date.now() }).catch(console.error);
+    await saveHistory(userId, [
+      ...history,
+      { role: "user", text: "[Ovozli xabar]", timestamp: Date.now() },
+      { role: "model", text: reply, timestamp: Date.now() },
+    ]).catch(console.error);
 
     await deliverReply(chatId, reply, mode);
     return;
@@ -207,8 +210,11 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       return;
     }
 
-    await appendHistory(userId, { role: "user", text, timestamp: Date.now() }).catch(console.error);
-    await appendHistory(userId, { role: "model", text: reply, timestamp: Date.now() }).catch(console.error);
+    await saveHistory(userId, [
+      ...history,
+      { role: "user", text, timestamp: Date.now() },
+      { role: "model", text: reply, timestamp: Date.now() },
+    ]).catch(console.error);
 
     await deliverReply(chatId, reply, mode);
   }
@@ -230,8 +236,10 @@ async function deliverReply(
     return;
   }
 
+  // TTS uchun 800 belgidan oshsa qisqartirish — narxni tejash
+  const ttsText = text.length > 800 ? text.slice(0, 800) + "…" : text;
   try {
-    const mp3 = await textToSpeech(text);
+    const mp3 = await textToSpeech(ttsText);
     await sendVoiceMessage(chatId, mp3);
   } catch (err) {
     console.error("TTS xatosi:", err);
