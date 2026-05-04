@@ -3,6 +3,16 @@ import { getHistory, saveHistory, clearHistory, getUserMode, setUserMode } from 
 import { getMemory } from "./memory";
 import { generateReply, buildSystemPrompt, classifyGeminiError } from "./gemini";
 import { downloadVoice, replyToVoice, textToSpeech } from "./audio";
+import {
+  getAuthState,
+  setAuthState,
+  clearAuthState,
+  hasSession,
+  startAuth,
+  verifyCode,
+  verify2FA,
+  type AuthState,
+} from "./userclient";
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -119,9 +129,27 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
         "• /voice — ovozli javob rejimi\n" +
         "• /text — matn javob rejimi\n" +
         "• /clear — suhbat tarixini tozalash\n" +
-        "• /memory — joriy xotirani ko'rish\n\n" +
+        "• /memory — joriy xotirani ko'rish\n" +
+        "• /auth\\_tg — Telegram hisobini ulash (kontaktlarga xabar yuborish)\n\n" +
         "Savolingizni yozing yoki ovozli xabar yuboring!"
     );
+    return;
+  }
+
+  if (text === "/auth_tg") {
+    const already = await hasSession(userId);
+    if (already) {
+      await sendMessage(chatId, "✅ Telegram hisobingiz allaqachon ulangan. Kontaktlarga xabar yuborishim mumkin.");
+      return;
+    }
+    await setAuthState(userId, { step: "waiting_phone" });
+    await sendMessage(chatId, "📱 Telegram telefon raqamingizni yuboring:\n(Misol: +998901234567)");
+    return;
+  }
+
+  if (text === "/auth_cancel") {
+    await clearAuthState(userId);
+    await sendMessage(chatId, "❌ Autentifikatsiya bekor qilindi.");
     return;
   }
 
@@ -149,6 +177,16 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     await setUserMode(userId, "text");
     await sendMessage(chatId, "💬 Matn javob rejimi yoqildi.");
     return;
+  }
+
+  // ── Auth flow interceptor ──────────────────────────────────────────────────
+
+  if (text) {
+    const authState = await getAuthState(userId);
+    if (authState) {
+      await handleAuthStep(chatId, userId, text, authState);
+      return;
+    }
   }
 
   // ── Ma'lumotlarni parallel yuklash ─────────────────────────────────────────
@@ -217,6 +255,60 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     ]).catch(console.error);
 
     await deliverReply(chatId, reply, mode);
+  }
+}
+
+// ─── Telegram Auth Flow ───────────────────────────────────────────────────────
+
+async function handleAuthStep(
+  chatId: number,
+  userId: number,
+  text: string,
+  state: AuthState
+): Promise<void> {
+  if (state.step === "waiting_phone") {
+    const phone = text.trim();
+    if (!/^\+\d{7,15}$/.test(phone)) {
+      await sendMessage(chatId, "❌ Noto'g'ri format. Misol: +998901234567");
+      return;
+    }
+    try {
+      await startAuth(userId, phone);
+      await sendMessage(chatId, "✅ SMS kod yuborildi. Kodni kiriting:\n(/auth\\_cancel — bekor qilish)");
+    } catch (err) {
+      await clearAuthState(userId);
+      const msg = err instanceof Error ? err.message : String(err);
+      await sendMessage(chatId, `❌ Xatolik: ${msg}\nQayta /auth\\_tg bosing.`);
+    }
+    return;
+  }
+
+  if (state.step === "waiting_code") {
+    const code = text.trim().replace(/\s/g, "");
+    try {
+      const result = await verifyCode(userId, state.phone, state.phoneCodeHash, code);
+      if (result === "done") {
+        await sendMessage(chatId, "✅ Telegram hisobi muvaffaqiyatli ulandi!\nEndi kontaktlarga xabar yuborishingizni ayta olaman.");
+      } else {
+        await sendMessage(chatId, "🔐 2FA parol kerak. Parolni yuboring:");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await sendMessage(chatId, `❌ Kod noto'g'ri: ${msg}\nQayta urinib ko'ring:`);
+    }
+    return;
+  }
+
+  if (state.step === "waiting_2fa") {
+    const password = text.trim();
+    try {
+      await verify2FA(userId, state.partialSession, password);
+      await sendMessage(chatId, "✅ Telegram hisobi ulandi! Kontaktlarga xabar yuborishim mumkin.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await sendMessage(chatId, `❌ 2FA parol noto'g'ri: ${msg}\nQayta urinib ko'ring:`);
+    }
+    return;
   }
 }
 
