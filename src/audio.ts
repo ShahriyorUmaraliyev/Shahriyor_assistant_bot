@@ -76,9 +76,12 @@ export async function replyToVoice(
     tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool] }],
   });
 
-  const chat = model.startChat({
-    history: history.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
-  });
+  // Ovozli xabar o'zi kontekst beradi — oxirgi 4 xabar yetarli (token tejash)
+  const trimmedHistory = history.slice(-4).map((m) => ({
+    role: m.role,
+    parts: [{ text: m.text.length > 500 ? m.text.slice(0, 500) + "…" : m.text }],
+  }));
+  const chat = model.startChat({ history: trimmedHistory });
 
   let result = await withRetry(() =>
     withTimeout(
