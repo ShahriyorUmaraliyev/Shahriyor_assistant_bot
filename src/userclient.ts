@@ -22,7 +22,7 @@ const AUTH_KEY = (uid: number) => `userclient:auth:${uid}`;
 
 export type AuthState =
   | { step: "waiting_phone" }
-  | { step: "waiting_code"; phone: string; phoneCodeHash: string }
+  | { step: "waiting_code"; phone: string; phoneCodeHash: string; partialSession: string }
   | { step: "waiting_2fa"; partialSession: string };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -73,10 +73,13 @@ export async function startAuth(uid: number, phone: string): Promise<void> {
         settings: new Api.CodeSettings({}),
       })
     ) as unknown as { phoneCodeHash: string };
+    // Sessiyani ham saqlaymiz — verifyCode da ayni shu sessiya kerak
+    const partialSession = saveStr(client);
     await setAuthState(uid, {
       step: "waiting_code",
       phone,
       phoneCodeHash: result.phoneCodeHash,
+      partialSession,
     });
   } finally {
     await client.disconnect();
@@ -88,9 +91,11 @@ export async function verifyCode(
   uid: number,
   phone: string,
   phoneCodeHash: string,
-  code: string
+  code: string,
+  partialSession: string
 ): Promise<"done" | "need_2fa"> {
-  const client = makeClient();
+  // Ayni kod yuborilgan sessiyani tiklash — PHONECODEEXPIRED oldini olish
+  const client = makeClient(partialSession);
   await client.connect();
   try {
     await client.invoke(
