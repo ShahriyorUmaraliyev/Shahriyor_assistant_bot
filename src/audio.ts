@@ -73,7 +73,7 @@ export async function downloadVoice(
 // contents explicit — Part[] shorthand bilan audio SDK tomonidan o'tkazib yuboriladi.
 
 export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
-  const model = getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
   const result = await withRetry(() =>
     withTimeout(
       model.generateContent({
