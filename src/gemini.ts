@@ -256,8 +256,9 @@ export async function generateReply(
       { functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool] },
       { googleSearch: {} },
     ] as any,
-    // Thinking o'chirildi: oddiy assistant uchun keraksiz, $3.50/1M token (6x qimmat)
-    generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
+    // thinkingBudget: 0 emas — Google Search qachon kerakligini aniqlash uchun
+    // model biroz fikrlashi shart. Bepul tierda thinking tokenlari bepul.
+    generationConfig: { thinkingConfig: { thinkingBudget: 1024 } } as any,
   });
 
   const chat = model.startChat({ history: trimHistory(history) });
