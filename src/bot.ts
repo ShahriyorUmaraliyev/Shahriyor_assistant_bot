@@ -3,16 +3,7 @@ import { getHistory, saveHistory, clearHistory, getUserMode, setUserMode } from 
 import { getMemory } from "./memory";
 import { generateReply, buildSystemPrompt, classifyGeminiError } from "./gemini";
 import { downloadVoice, replyToVoice, textToSpeech } from "./audio";
-import {
-  getAuthState,
-  setAuthState,
-  clearAuthState,
-  hasSession,
-  startAuth,
-  verifyCode,
-  verify2FA,
-  type AuthState,
-} from "./userclient";
+import { hasSession } from "./userclient";
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -107,13 +98,12 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
   if (!userId) return;
   if (!isAllowed(userId)) {
     console.log(`⚠️ Bloklangan/Ruxsatsiz foydalanuvchi yozdi: ID=${userId}`);
-    return; // jim qolish
+    return;
   }
 
   const text = message.text?.trim();
   const voice = message.voice;
 
-  // Matn ham, ovoz ham yo'q bo'lsa — ogohlantirib o'tkazib yuborish
   if (!text && !voice) {
     await sendMessage(chatId, "Bunday turni tushunmayman. Hozircha faqat matn va ovozli xabarlarga javob bera olaman.");
     return;
@@ -130,26 +120,26 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
         "• /text — matn javob rejimi\n" +
         "• /clear — suhbat tarixini tozalash\n" +
         "• /memory — joriy xotirani ko'rish\n" +
-        "• /auth\\_tg — Telegram hisobini ulash (kontaktlarga xabar yuborish)\n\n" +
+        "• /auth\\_tg — Telegram hisobi holati\n\n" +
         "Savolingizni yozing yoki ovozli xabar yuboring!"
     );
     return;
   }
 
   if (text === "/auth_tg") {
-    const already = await hasSession(userId);
-    if (already) {
-      await sendMessage(chatId, "✅ Telegram hisobingiz allaqachon ulangan. Kontaktlarga xabar yuborishim mumkin.");
-      return;
+    const connected = await hasSession(userId);
+    if (connected) {
+      await sendMessage(chatId, "✅ Telegram hisobingiz ulangan. Kontaktlarga xabar yuborishim mumkin.");
+    } else {
+      await sendMessage(
+        chatId,
+        "❌ Telegram hisobi ulanmagan.\n\n" +
+        "Ulanish uchun lokal kompyuterda quyidagini bajaring:\n" +
+        "```\nnode scripts/generate-session.mjs\n```\n" +
+        "Keyin chiqgan session stringni Vercel → Settings → Environment Variables ga\n" +
+        "`TELEGRAM_SESSION` nomi bilan qo'shing va redeploy qiling."
+      );
     }
-    await setAuthState(userId, { step: "waiting_phone" });
-    await sendMessage(chatId, "📱 Telegram telefon raqamingizni yuboring:\n(Misol: +998901234567)");
-    return;
-  }
-
-  if (text === "/auth_cancel") {
-    await clearAuthState(userId);
-    await sendMessage(chatId, "❌ Autentifikatsiya bekor qilindi.");
     return;
   }
 
@@ -177,16 +167,6 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     await setUserMode(userId, "text");
     await sendMessage(chatId, "💬 Matn javob rejimi yoqildi.");
     return;
-  }
-
-  // ── Auth flow interceptor ──────────────────────────────────────────────────
-
-  if (text) {
-    const authState = await getAuthState(userId);
-    if (authState) {
-      await handleAuthStep(chatId, userId, text, authState);
-      return;
-    }
   }
 
   // ── Ma'lumotlarni parallel yuklash ─────────────────────────────────────────
@@ -258,71 +238,6 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
   }
 }
 
-// ─── Telegram Auth Flow ───────────────────────────────────────────────────────
-
-async function handleAuthStep(
-  chatId: number,
-  userId: number,
-  text: string,
-  state: AuthState
-): Promise<void> {
-  if (state.step === "waiting_phone") {
-    const phone = text.trim();
-    if (!/^\+\d{7,15}$/.test(phone)) {
-      await sendMessage(chatId, "❌ Noto'g'ri format. Misol: +998901234567");
-      return;
-    }
-    try {
-      await startAuth(userId, phone);
-      await sendMessage(chatId, "✅ SMS kod yuborildi. Kodni kiriting:\n(/auth\\_cancel — bekor qilish)");
-    } catch (err) {
-      await clearAuthState(userId);
-      const msg = err instanceof Error ? err.message : String(err);
-      await sendMessage(chatId, `❌ Xatolik: ${msg}\nQayta /auth\\_tg bosing.`);
-    }
-    return;
-  }
-
-  if (state.step === "waiting_code") {
-    const code = text.trim().replace(/\s/g, "");
-    // partialSession yo'q = eski auth state (fix oldin yaratilgan) → qaytadan boshlash kerak
-    if (!state.partialSession) {
-      await clearAuthState(userId);
-      await sendMessage(chatId, "⚠️ Sessiya eskirgan. Qaytadan /auth\\_tg bosing.");
-      return;
-    }
-    try {
-      const result = await verifyCode(userId, state.phone, state.phoneCodeHash, code, state.partialSession);
-      if (result === "done") {
-        await sendMessage(chatId, "✅ Telegram hisobi muvaffaqiyatli ulandi!\nEndi kontaktlarga xabar yuborishingizni ayta olaman.");
-      } else {
-        await sendMessage(chatId, "🔐 2FA parol kerak. Parolni yuboring:");
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("PHONE_CODE_EXPIRED") || msg.includes("PHONECODEEXPIRED")) {
-        await clearAuthState(userId);
-        await sendMessage(chatId, "⏱ Kod muddati o'tdi. Qaytadan /auth\\_tg bosing (kodni tezroq kiriting).");
-      } else {
-        await sendMessage(chatId, `❌ Kod noto'g'ri: ${msg}\nQayta urinib ko'ring:`);
-      }
-    }
-    return;
-  }
-
-  if (state.step === "waiting_2fa") {
-    const password = text.trim();
-    try {
-      await verify2FA(userId, state.partialSession, password);
-      await sendMessage(chatId, "✅ Telegram hisobi ulandi! Kontaktlarga xabar yuborishim mumkin.");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await sendMessage(chatId, `❌ 2FA parol noto'g'ri: ${msg}\nQayta urinib ko'ring:`);
-    }
-    return;
-  }
-}
-
 // ─── Reply delivery: matn yoki ovoz ──────────────────────────────────────────
 
 async function deliverReply(
@@ -339,14 +254,12 @@ async function deliverReply(
     return;
   }
 
-  // TTS uchun 800 belgidan oshsa qisqartirish — narxni tejash
   const ttsText = text.length > 800 ? text.slice(0, 800) + "…" : text;
   try {
     const mp3 = await textToSpeech(ttsText);
     await sendVoiceMessage(chatId, mp3);
   } catch (err) {
     console.error("TTS xatosi:", err);
-    // TTS ishlamasa — matn sifatida yuborish
     await sendMessage(
       chatId,
       `🔇 _Ovozli javob yaratib bo'lmadi — matn sifatida:_\n\n${text}`
