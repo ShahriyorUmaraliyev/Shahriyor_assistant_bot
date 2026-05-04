@@ -100,12 +100,16 @@ export async function replyToVoice(
   const calls = result.response.functionCalls();
   if (calls?.length) {
     const toolResults = await Promise.all(
-      calls.map(async (call) => ({
-        functionResponse: {
-          name: call.name,
-          response: { result: await handleTool(call.name, call.args as Record<string, unknown>, userId) },
-        },
-      }))
+      calls.map(async (call) => {
+        let toolResult: string;
+        try {
+          toolResult = await handleTool(call.name, call.args as Record<string, unknown>, userId);
+        } catch (err) {
+          console.error(`Tool "${call.name}" xatosi:`, err);
+          toolResult = `Xatolik: ${err instanceof Error ? err.message : String(err)}`;
+        }
+        return { functionResponse: { name: call.name, response: { result: toolResult } } };
+      })
     );
     result = await withRetry(() =>
       withTimeout(chat.sendMessage(toolResults), GEMINI_TIMEOUT_MS)
