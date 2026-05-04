@@ -12,7 +12,8 @@
     "@google/generative-ai": "^0.21.0",
     "@upstash/qstash": "^2.7.0",
     "@upstash/redis": "^1.34.0",
-    "lamejs": "^1.2.1"
+    "lamejs": "^1.2.1",
+    "telegram": "^2.26.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

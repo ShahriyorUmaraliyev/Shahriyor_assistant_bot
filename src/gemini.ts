@@ -1,8 +1,9 @@
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import type { UserMemory, ChatMessage } from "./types";
-import { patchMemory } from "./memory";
+import { patchMemory, getMemory } from "./memory";
 import { scheduleReminder } from "./reminder";
 import { getCurrentWeather } from "./weather";
+import { sendUserMessage } from "./userclient";
 
 // Gemini API client — lazy singleton
 let _genAI: GoogleGenerativeAI | null = null;
@@ -90,7 +91,8 @@ XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
 - vaqtli eslatma → set_reminder (ISO 8601 +05:00) | "ertaga"=ertangi kun | soat yo'q: ertalab=09:00, tush=14:00, kech=18:00 | "soat 1-11" = kechqurun (13:00-23:00), ya'ni "soat 3"=15:00, "soat 9"=21:00
-- MUHIM: eslatmalar FAQAT Shahriyorning o'ziga yuboriladi. Boshqa odamlarga (akasi, do'sti va h.k.) Telegram xabar yubora olmayman — bu texnik imkonsiz. Buning o'rniga Shahriyorga eslatma qo'yaman.`;
+- kontaktga xabar yuborish → send_message (xotirada telefon bo'lishi shart; /auth_tg bilan hisob ulanmagan bo'lsa ayta)
+- MUHIM: eslatmalar (set_reminder) FAQAT Shahriyorning o'ziga keladi. Boshqalarga xabar yuborish uchun send_message ishlatiladi.`;
 }
 
 // ─── Tool Declarations ────────────────────────────────────────────────────────
@@ -157,6 +159,27 @@ export const getWeatherTool = {
   },
 };
 
+export const sendMessageTool = {
+  name: "send_message",
+  description:
+    "Foydalanuvchi (Shahriyor) nomidan kontaktga Telegram xabar yuborish. " +
+    "Hisobi /auth_tg orqali ulanган bo'lishi kerak. Kontakt telefon xotirada saqlangan bo'lishi kerak.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      contact: {
+        type: SchemaType.STRING,
+        description: "Kontakt ismi (xotiradagidan telefon topiladi), yoki to'g'ridan telefon (+998...) yoki @username",
+      },
+      message: {
+        type: SchemaType.STRING,
+        description: "Yuboriladigan xabar matni",
+      },
+    },
+    required: ["contact", "message"],
+  },
+};
+
 // ─── Function Call Handler ────────────────────────────────────────────────────
 
 export async function handleTool(
@@ -184,6 +207,24 @@ export async function handleTool(
     const { city } = args as { city: string };
     return await getCurrentWeather(city);
   }
+  if (name === "send_message") {
+    const { contact, message } = args as { contact: string; message: string };
+    let recipient = contact;
+    // Telefon/username bo'lmasa — xotiradan qidirish
+    if (!contact.startsWith("+") && !contact.startsWith("@")) {
+      const memory = await getMemory(userId);
+      const lower = contact.toLowerCase();
+      for (const [name, data] of Object.entries(memory.contacts)) {
+        if (name.toLowerCase().includes(lower) || lower.includes(name.toLowerCase())) {
+          if (data.phone) { recipient = data.phone; break; }
+        }
+      }
+      if (recipient === contact)
+        return `"${contact}" kontaktining telefon raqami xotirada topilmadi. Avval kontakt raqamini saqlang.`;
+    }
+    await sendUserMessage(userId, recipient, message);
+    return `Xabar yuborildi.`;
+  }
   return "Noma'lum funksiya.";
 }
 
@@ -209,7 +250,7 @@ export async function generateReply(
   const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(memory),
-    tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool] }],
+    tools: [{ functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool] }],
     // Thinking o'chirildi: oddiy assistant uchun keraksiz, $3.50/1M token (6x qimmat)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
