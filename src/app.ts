@@ -25,7 +25,7 @@ app.use((req: Request, _res: Response, next) => {
 const TG = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 const TG_TIMEOUT_MS = 8_000;
 
-async function tgPost(path: string, body: unknown): Promise<Response> {
+async function tgPost(path: string, body: unknown): Promise<globalThis.Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TG_TIMEOUT_MS);
   try {
@@ -34,7 +34,7 @@ async function tgPost(path: string, body: unknown): Promise<Response> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: ctrl.signal,
-    }) as unknown as Response;
+    });
   } catch (err) {
     if ((err as Error).name === "AbortError") throw new Error("TELEGRAM_TIMEOUT");
     throw err;
@@ -44,9 +44,9 @@ async function tgPost(path: string, body: unknown): Promise<Response> {
 }
 
 async function sendReminderMessage(chatId: number, text: string): Promise<void> {
-  let res = await tgPost("sendMessage", { chat_id: chatId, text, parse_mode: "Markdown" }) as unknown as globalThis.Response;
+  let res = await tgPost("sendMessage", { chat_id: chatId, text, parse_mode: "Markdown" });
   if (!res.ok) {
-    res = await tgPost("sendMessage", { chat_id: chatId, text }) as unknown as globalThis.Response;
+    res = await tgPost("sendMessage", { chat_id: chatId, text });
     if (!res.ok) throw new Error(`Telegram xatosi: ${await res.text()}`);
   }
 }
