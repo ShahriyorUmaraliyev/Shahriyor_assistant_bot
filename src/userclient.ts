@@ -25,11 +25,15 @@ function makeClient(): TelegramClient {
 export async function sendUserMessage(uid: number, to: string, message: string): Promise<void> {
   const client = makeClient();
   await client.connect();
+  // disconnect in finally — but don't let disconnect error mask the original
+  let sendError: unknown;
   try {
     await client.sendMessage(to, { message });
-  } finally {
-    await client.disconnect();
+  } catch (err) {
+    sendError = err;
   }
+  await client.disconnect().catch((e) => console.error("TelegramClient disconnect xatosi:", e));
+  if (sendError) throw sendError;
 }
 
 export async function hasSession(_uid: number): Promise<boolean> {

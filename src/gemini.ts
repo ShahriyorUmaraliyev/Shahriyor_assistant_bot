@@ -277,7 +277,8 @@ export async function generateReply(
     tools: [
       { functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool] },
     ] as any,
-    generationConfig: { thinkingConfig: { thinkingBudget: 1024 } } as any,
+    // Tool calls don't benefit from thinking — disable to save tokens
+    generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
   });
 
   const chat = model.startChat({ history: trimHistory(history) });

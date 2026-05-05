@@ -49,7 +49,7 @@ export async function getCurrentWeather(city: string): Promise<string> {
     seziladi: `${Math.round(d.main.feels_like)}°C`,
     min_max: `${Math.round(d.main.temp_min)}/${Math.round(d.main.temp_max)}°C`,
     namlik: `${d.main.humidity}%`,
-    holat: d.weather[0].description,
+    holat: d.weather[0]?.description ?? "noma'lum",
     shamol: `${d.wind.speed} m/s`,
   });
 }

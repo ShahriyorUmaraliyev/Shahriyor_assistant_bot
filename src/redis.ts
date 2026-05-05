@@ -23,15 +23,6 @@ export async function getHistory(userId: number): Promise<ChatMessage[]> {
   return (await getRedis().get<ChatMessage[]>(historyKey(userId))) ?? [];
 }
 
-export async function appendHistory(
-  userId: number,
-  message: ChatMessage
-): Promise<void> {
-  const history = await getHistory(userId);
-  const trimmed = [...history, message].slice(-HISTORY_LIMIT);
-  await getRedis().set(historyKey(userId), trimmed, { ex: 60 * 60 * 24 * 7 });
-}
-
 export async function clearHistory(userId: number): Promise<void> {
   await getRedis().del(historyKey(userId));
 }

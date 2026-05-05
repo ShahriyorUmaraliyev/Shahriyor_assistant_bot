@@ -193,8 +193,12 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       return;
     }
 
-    await sendTyping(chatId);
-    const [history, memory] = await Promise.all([getHistory(userId), getMemory(userId)]);
+    const [, history, memory, mode] = await Promise.all([
+      sendTyping(chatId),
+      getHistory(userId),
+      getMemory(userId),
+      getUserMode(userId),
+    ]);
 
     let reply: string;
     try {
@@ -211,7 +215,6 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       { role: "model", text: reply, timestamp: Date.now() },
     ]).catch(console.error);
 
-    const mode = await getUserMode(userId);
     await deliverReply(chatId, reply, mode);
     return;
   }

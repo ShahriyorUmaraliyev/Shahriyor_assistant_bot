@@ -3,19 +3,30 @@ import { Receiver } from "@upstash/qstash";
 import type { ReminderPayload } from "../src/types";
 
 const TG = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
+const TG_TIMEOUT_MS = 8_000;
 
-async function sendMessage(chatId: number, text: string): Promise<void> {
-  let res = await fetch(`${TG}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
-  });
-  if (!res.ok) {
-    res = await fetch(`${TG}/sendMessage`, {
+async function tgPost(url: string, body: unknown): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TG_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text }),
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
     });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") throw new Error("TELEGRAM_TIMEOUT");
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function sendMessage(chatId: number, text: string): Promise<void> {
+  let res = await tgPost(`${TG}/sendMessage`, { chat_id: chatId, text, parse_mode: "Markdown" });
+  if (!res.ok) {
+    res = await tgPost(`${TG}/sendMessage`, { chat_id: chatId, text });
     if (!res.ok) throw new Error(`Telegram xatosi: ${await res.text()}`);
   }
 }
