@@ -65,8 +65,13 @@ export async function downloadVoice(
 // audio SDK tomonidan o'tkazib yuboriladi.
 
 export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
-  // 2.0-flash: thinking yo'q → arzonroq, transcription uchun sifat yetarli
-  const model = getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" });
+  // gemini-2.5-flash: audio input qo'llab-quvvatlaydi; thinkingBudget:0 bilan
+  // thinking tokenlar sarflanmaydi — transcription uchun thinking keraksiz
+  const model = getGenAI().getGenerativeModel({
+    model: "gemini-2.5-flash",
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
+  });
   const result = await withRetry(() =>
     withTimeout(
       model.generateContent({
@@ -118,24 +123,29 @@ export async function textToSpeech(text: string): Promise<Buffer> {
     )
   );
 
-  const candidate = result?.response?.candidates?.[0];
+  const candidates = result?.response?.candidates;
+  const candidate = candidates?.[0];
   const part = candidate?.content?.parts?.[0];
   const data: string | undefined = part?.inlineData?.data;
 
   if (!data) {
-    console.error("[TTS] No audio data. Response:", JSON.stringify({
-      finishReason: candidate?.finishReason,
+    // To'liq diagnostika — konsolda ko'ring, muammoni aniqlang
+    console.error("[TTS] Audio data yo'q! Sabab:", JSON.stringify({
+      candidatesCount: candidates?.length ?? 0,
+      finishReason: candidate?.finishReason ?? "yo'q (candidates bo'sh)",
+      promptFeedback: (result?.response as any)?.promptFeedback ?? null,
       mimeType: part?.inlineData?.mimeType ?? null,
       hasText: !!part?.text,
-      textPreview: part?.text?.slice(0, 100),
+      textPreview: part?.text?.slice(0, 200) ?? null,
       partKeys: part ? Object.keys(part) : null,
+      rawCandidates: JSON.stringify(candidates).slice(0, 500),
     }));
     throw new Error("TTS_NO_AUDIO");
   }
 
   const mimeType: string = part?.inlineData?.mimeType ?? "audio/pcm";
   if (!mimeType.startsWith("audio/pcm") && !mimeType.startsWith("audio/l16")) {
-    console.error(`[TTS] Kutilmagan audio format: ${mimeType} — pcm16ToMp3 noto'g'ri ishlashi mumkin`);
+    console.error(`[TTS] Kutilmagan format: "${mimeType}" — PCM kutilmoqda, audio buzilishi mumkin`);
   }
 
   return pcm16ToMp3(Buffer.from(data, "base64"));
