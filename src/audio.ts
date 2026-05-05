@@ -1,5 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { withTimeout, withRetry, GEMINI_TIMEOUT_MS } from "./gemini";
+import { getGenAI, withTimeout, withRetry, GEMINI_TIMEOUT_MS } from "./gemini";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -9,14 +8,6 @@ const DOWNLOAD_TIMEOUT_MS = 10_000;       // 10 sekund
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN sozlanmagan");
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
-
-// ─── Lazy Gemini ──────────────────────────────────────────────────────────────
-
-let _genAI: GoogleGenerativeAI | null = null;
-function getGenAI(): GoogleGenerativeAI {
-  if (!_genAI) _genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  return _genAI;
-}
 
 // ─── Fetch with timeout ───────────────────────────────────────────────────────
 
@@ -110,17 +101,19 @@ export async function textToSpeech(text: string): Promise<Buffer> {
   // responseModalities SDK typingda yo'q — any orqali yuboramiz
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const generateFn = model.generateContent.bind(model) as (req: any) => Promise<any>;
-  const result = await withTimeout(
-    generateFn({
-      contents: [{ role: "user", parts: [{ text }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
+  const result = await withRetry(() =>
+    withTimeout(
+      generateFn({
+        contents: [{ role: "user", parts: [{ text }] }],
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
+          },
         },
-      },
-    }),
-    GEMINI_TIMEOUT_MS
+      }),
+      GEMINI_TIMEOUT_MS
+    )
   );
 
   const candidate = result?.response?.candidates?.[0];

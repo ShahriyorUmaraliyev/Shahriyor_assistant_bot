@@ -78,25 +78,20 @@ app.post("/webhook", (req: Request, res: Response) => {
 
 app.post("/api/remind", async (req: Request, res: Response) => {
   const rawBody = (req as Request & { rawBody: string }).rawBody;
-  const signingKey = process.env.QSTASH_CURRENT_SIGNING_KEY;
-  const nextKey = process.env.QSTASH_NEXT_SIGNING_KEY;
 
-  if (signingKey && nextKey) {
-    const receiver = new Receiver({
-      currentSigningKey: signingKey,
-      nextSigningKey: nextKey,
+  // Signing keys startup da tekshirilgan — har doim majburiy
+  const receiver = new Receiver({
+    currentSigningKey: process.env.QSTASH_CURRENT_SIGNING_KEY!,
+    nextSigningKey: process.env.QSTASH_NEXT_SIGNING_KEY!,
+  });
+  try {
+    await receiver.verify({
+      signature: req.headers["upstash-signature"] as string,
+      body: rawBody,
     });
-    try {
-      await receiver.verify({
-        signature: req.headers["upstash-signature"] as string,
-        body: rawBody,
-      });
-    } catch {
-      res.status(401).end("Unauthorized");
-      return;
-    }
-  } else {
-    console.warn("⚠️ QStash signing keys sozlanmagan — /api/remind himoyasiz!");
+  } catch {
+    res.status(401).end("Unauthorized");
+    return;
   }
 
   const { userId, text } = req.body as ReminderPayload;

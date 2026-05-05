@@ -5,11 +5,21 @@ import { scheduleReminder } from "./reminder";
 import { getCurrentWeather } from "./weather";
 import { sendUserMessage } from "./userclient";
 
-// Gemini API client — lazy singleton
+// Gemini API client — lazy singleton (audio.ts ham shu instansni ishlatadi)
 let _genAI: GoogleGenerativeAI | null = null;
-function getGenAI(): GoogleGenerativeAI {
+export function getGenAI(): GoogleGenerativeAI {
   if (!_genAI) _genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
   return _genAI;
+}
+
+function logTokenUsage(label: string, response: { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; totalTokenCount?: number } }): void {
+  const u = response.usageMetadata;
+  if (!u) return;
+  console.log(
+    `[Gemini:${label}] prompt=${u.promptTokenCount ?? 0} output=${u.candidatesTokenCount ?? 0}` +
+    (u.thoughtsTokenCount ? ` thinking=${u.thoughtsTokenCount}` : "") +
+    ` total=${u.totalTokenCount ?? 0}`
+  );
 }
 
 // Cloud Run timeout 300s — Gemini ga 50s beramiz (ovozli xabar pipeline uchun yetarli)
@@ -255,12 +265,14 @@ export async function generateWithSearch(
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(memory, mode),
     tools: [{ googleSearch: {} }] as any,
-    generationConfig: { thinkingConfig: { thinkingBudget: 1024 } } as any,
+    // Grounding results are already factual — thinking tokens not needed
+    generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
   });
   const chat = model.startChat({ history: trimHistory(history) });
   const result = await withRetry(() =>
     withTimeout(chat.sendMessage(userText), GEMINI_TIMEOUT_MS)
   );
+  logTokenUsage("search", result.response as any);
   try {
     return result.response.text() || "Bajarildi.";
   } catch {
@@ -314,6 +326,7 @@ export async function generateReply(
     );
   }
 
+  logTokenUsage("reply", result.response as any);
   try {
     return result.response.text() || "Bajarildi.";
   } catch {

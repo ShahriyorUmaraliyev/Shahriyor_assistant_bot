@@ -4,7 +4,7 @@ import type { ChatMessage, UserMode } from "./types";
 // Lazy initialization — instance faqat birinchi chaqiruvda yaratiladi
 let _redis: Redis | null = null;
 
-function getRedis(): Redis {
+export function getRedis(): Redis {
   if (!_redis) {
     _redis = new Redis({
       url: process.env.UPSTASH_REDIS_REST_URL!,
