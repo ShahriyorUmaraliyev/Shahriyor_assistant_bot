@@ -1,7 +1,7 @@
 import type { TelegramMessage } from "./types";
 import { getHistory, saveHistory, clearHistory, getUserMode, setUserMode } from "./redis";
 import { getMemory } from "./memory";
-import { generateReply, classifyGeminiError } from "./gemini";
+import { generateReply, generateWithSearch, classifyGeminiError } from "./gemini";
 import { downloadVoice, transcribeVoice, textToSpeech } from "./audio";
 import { hasSession } from "./userclient";
 
@@ -158,6 +158,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       chatId,
       "Salom! Men *Shahriyor Assist* — sizning shaxsiy AI assistantingizman 🤖\n\n" +
         "• Ovozli xabar yuboring — tushunib javob beraman\n" +
+        "• /search \\<so'rov\\> — Google orqali real vaqt qidiruv\n" +
         "• /voice — ovozli javob rejimi\n" +
         "• /text — matn javob rejimi\n" +
         "• /clear — suhbat tarixini tozalash\n" +
@@ -182,6 +183,36 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
         "`TELEGRAM_SESSION` nomi bilan qo'shing va redeploy qiling."
       );
     }
+    return;
+  }
+
+  if (text === "/search" || text?.startsWith("/search ")) {
+    const query = text.slice("/search".length).trim();
+    if (!query) {
+      await sendMessage(chatId, "🔍 Qidiruv so'rovini kiriting.\nMisol: `/search bugungi AI yangiliklari`");
+      return;
+    }
+
+    await sendTyping(chatId);
+    const [history, memory] = await Promise.all([getHistory(userId), getMemory(userId)]);
+
+    let reply: string;
+    try {
+      reply = await generateWithSearch(query, history, memory);
+    } catch (err) {
+      console.error("generateWithSearch xatosi:", err);
+      await sendMessage(chatId, geminiErrorMessage(err));
+      return;
+    }
+
+    await saveHistory(userId, [
+      ...history,
+      { role: "user", text: `🔍 ${query}`, timestamp: Date.now() },
+      { role: "model", text: reply, timestamp: Date.now() },
+    ]).catch(console.error);
+
+    const mode = await getUserMode(userId);
+    await deliverReply(chatId, reply, mode);
     return;
   }
 

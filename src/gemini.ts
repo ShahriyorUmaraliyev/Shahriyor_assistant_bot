@@ -87,7 +87,7 @@ export function buildSystemPrompt(memory: UserMemory): string {
 
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
 TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
-QOBILIYAT: Matn va ovozli xabarlarni qabul qilaman. Ovozli javob yubora olaman (/voice rejimida). Ob-havo ma'lumotlari (get_weather), eslatmalar, kontaktlar va xabar yuborish imkonim bor. Yangiliklar va joriy voqealar haqida so'ralganda Google Search orqali real vaqtda javob beraman.
+QOBILIYAT: Matn va ovozli xabarlarni qabul qilaman. Ovozli javob yubora olaman (/voice rejimida). Ob-havo, eslatmalar, kontaktlar va xabar yuborish imkonim bor. Real vaqt ma'lumotlari uchun foydalanuvchi /search komandasi ishlatishi kerak.
 XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
@@ -239,23 +239,7 @@ function trimHistory(history: ChatMessage[]): { role: string; parts: { text: str
   }));
 }
 
-// Gemini API: googleSearch va functionDeclarations bitta so'rovda ishlamaydi.
-// Ob-havo get_weather tool orqali hal qilinadi, qolgan real-vaqt so'rovlar uchun
-// alohida googleSearch modeli ishlatiladi.
-const SEARCH_KEYWORDS = [
-  "yangilik", "xabar", "news", "trend", "so'nggi", "oxirgi xabar",
-  "bugungi ai", "bugungi texnologiya", "hozirgi", "kripto", "bitcoin",
-  "dollar kurs", "evro kurs", "neft narxi", "aksiya", "bozor",
-];
-
-function isSearchQuery(text: string): boolean {
-  const lower = text.toLowerCase();
-  if (lower.includes("ob-havo") || lower.includes("harorat") || lower.includes("weather"))
-    return false;
-  return SEARCH_KEYWORDS.some((kw) => lower.includes(kw));
-}
-
-async function generateWithSearch(
+export async function generateWithSearch(
   userText: string,
   history: ChatMessage[],
   memory: UserMemory
@@ -285,10 +269,6 @@ export async function generateReply(
   userId: number
 ): Promise<string> {
   const safeText = userText.length > 2000 ? userText.slice(0, 2000) + "…" : userText;
-
-  if (isSearchQuery(safeText)) {
-    return generateWithSearch(safeText, history, memory);
-  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const model = getGenAI().getGenerativeModel({
@@ -326,22 +306,9 @@ export async function generateReply(
     );
   }
 
-  const reply = (() => {
-    try {
-      return result.response.text() || "Bajarildi.";
-    } catch {
-      return "Vazifa bajarildi, lekin matnli javob yaratilmadi.";
-    }
-  })();
-
-  // Model "bilmayman" desa — Google Search bilan qayta urinish
-  const NO_ANSWER_INDICATORS = [
-    "bilmayman", "real vaqt", "ma'lumotim yo'q", "yangilanmagan",
-    "i don't know", "don't have access", "cannot access", "knowledge cutoff",
-  ];
-  if (NO_ANSWER_INDICATORS.some((s) => reply.toLowerCase().includes(s))) {
-    return generateWithSearch(safeText, history, memory);
+  try {
+    return result.response.text() || "Bajarildi.";
+  } catch {
+    return "Vazifa bajarildi, lekin matnli javob yaratilmadi.";
   }
-
-  return reply;
 }
