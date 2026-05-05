@@ -1,19 +1,6 @@
 import type { UserMemory } from "./types";
 import { EMPTY_MEMORY } from "./types";
-import { Redis } from "@upstash/redis";
-
-// Lazy initialization (redis.ts dan mustaqil, circular import yo'q)
-let _redis: Redis | null = null;
-
-function getRedis(): Redis {
-  if (!_redis) {
-    _redis = new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL!,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-    });
-  }
-  return _redis;
-}
+import { getRedis } from "./redis";
 
 const memoryKey = (userId: number) => `memory:${userId}`;
 

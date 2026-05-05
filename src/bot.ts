@@ -81,7 +81,10 @@ async function sendVoiceMessage(chatId: number, mp3Buffer: Buffer): Promise<void
       body: form,
       signal: ctrl.signal,
     });
-    if (!res.ok) throw new Error(`Telegram sendVoice xatosi: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Telegram sendVoice xatosi: ${res.status} — ${body.slice(0, 200)}`);
+    }
   } catch (err) {
     if ((err as Error).name === "AbortError") throw new Error("TELEGRAM_TIMEOUT");
     throw err;

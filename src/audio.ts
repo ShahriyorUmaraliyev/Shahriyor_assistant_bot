@@ -1,5 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { withTimeout, withRetry, GEMINI_TIMEOUT_MS } from "./gemini";
+import { getGenAI, withTimeout, withRetry, GEMINI_TIMEOUT_MS } from "./gemini";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -9,14 +8,6 @@ const DOWNLOAD_TIMEOUT_MS = 10_000;       // 10 sekund
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN sozlanmagan");
 const TG = `https://api.telegram.org/bot${BOT_TOKEN}`;
-
-// ─── Lazy Gemini ──────────────────────────────────────────────────────────────
-
-let _genAI: GoogleGenerativeAI | null = null;
-function getGenAI(): GoogleGenerativeAI {
-  if (!_genAI) _genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  return _genAI;
-}
 
 // ─── Fetch with timeout ───────────────────────────────────────────────────────
 
@@ -68,12 +59,14 @@ export async function downloadVoice(
 }
 
 // ─── 2. Audio Input: OGG → matn (transcription) ──────────────────────────────
-// gemini-2.0-flash: audio input uchun ishonchli, gemini-1.5-flash deprecated.
-// generateContent() — startChat()+tools+audio kombinatsiyasidan farqli ishonchli.
-// contents explicit — Part[] shorthand bilan audio SDK tomonidan o'tkazib yuboriladi.
+// gemini-2.0-flash: transcription uchun yetarli va arzonroq (2.5-flash thinking
+// tokenlari bu yerda keraksiz). generateContent() — startChat()+tools+audio
+// kombinatsiyasidan farqli ishonchli. contents explicit — Part[] shorthand bilan
+// audio SDK tomonidan o'tkazib yuboriladi.
 
 export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
-  const model = getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
+  // 2.0-flash: thinking yo'q → arzonroq, transcription uchun sifat yetarli
+  const model = getGenAI().getGenerativeModel({ model: "gemini-2.0-flash" });
   const result = await withRetry(() =>
     withTimeout(
       model.generateContent({
@@ -110,17 +103,19 @@ export async function textToSpeech(text: string): Promise<Buffer> {
   // responseModalities SDK typingda yo'q — any orqali yuboramiz
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const generateFn = model.generateContent.bind(model) as (req: any) => Promise<any>;
-  const result = await withTimeout(
-    generateFn({
-      contents: [{ role: "user", parts: [{ text }] }],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
+  const result = await withRetry(() =>
+    withTimeout(
+      generateFn({
+        contents: [{ role: "user", parts: [{ text }] }],
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
+          },
         },
-      },
-    }),
-    GEMINI_TIMEOUT_MS
+      }),
+      GEMINI_TIMEOUT_MS
+    )
   );
 
   const candidate = result?.response?.candidates?.[0];
@@ -128,14 +123,19 @@ export async function textToSpeech(text: string): Promise<Buffer> {
   const data: string | undefined = part?.inlineData?.data;
 
   if (!data) {
-    // Log actual response so we can debug in Cloud Run logs
     console.error("[TTS] No audio data. Response:", JSON.stringify({
       finishReason: candidate?.finishReason,
+      mimeType: part?.inlineData?.mimeType ?? null,
       hasText: !!part?.text,
       textPreview: part?.text?.slice(0, 100),
       partKeys: part ? Object.keys(part) : null,
     }));
     throw new Error("TTS_NO_AUDIO");
+  }
+
+  const mimeType: string = part?.inlineData?.mimeType ?? "audio/pcm";
+  if (!mimeType.startsWith("audio/pcm") && !mimeType.startsWith("audio/l16")) {
+    console.error(`[TTS] Kutilmagan audio format: ${mimeType} — pcm16ToMp3 noto'g'ri ishlashi mumkin`);
   }
 
   return pcm16ToMp3(Buffer.from(data, "base64"));
@@ -175,5 +175,7 @@ function pcm16ToMp3(pcmBuffer: Buffer): Buffer {
   const tail = encoder.flush();
   if (tail.length > 0) chunks.push(Buffer.from(tail));
 
-  return Buffer.concat(chunks);
+  const mp3 = Buffer.concat(chunks);
+  if (mp3.length === 0) throw new Error("TTS_NO_AUDIO");
+  return mp3;
 }
