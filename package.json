@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx src/main.ts",
+    "dev:poll": "tsx src/poll.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "start": "node dist/main.js"
