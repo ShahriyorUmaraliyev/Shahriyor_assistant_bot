@@ -76,7 +76,7 @@ function compactMemory(memory: UserMemory): string {
   return parts.length > 0 ? parts.join("\n") : "(bo'sh)";
 }
 
-export function buildSystemPrompt(memory: UserMemory): string {
+export function buildSystemPrompt(memory: UserMemory, mode: "text" | "voice" = "text"): string {
   const today = new Date().toLocaleDateString("uz-UZ", {
     timeZone: "Asia/Tashkent",
     year: "numeric",
@@ -85,9 +85,14 @@ export function buildSystemPrompt(memory: UserMemory): string {
     weekday: "long",
   });
 
+  const modeNote = mode === "voice"
+    ? "JORIY REJIM: OVOZLI — javoblarim ovoz xabari sifatida yuboriladi. Hech qachon 'ovozli rejimni yoqing' dema, u allaqachon yoqilgan."
+    : "JORIY REJIM: MATN — /voice buyrug'i bilan ovozli rejimga o'tish mumkin.";
+
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
 TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
-QOBILIYAT: Matn va ovozli xabarlarni qabul qilaman. Ovozli javob yubora olaman (/voice rejimida). Ob-havo, eslatmalar, kontaktlar va xabar yuborish imkonim bor. Real vaqt ma'lumotlari uchun foydalanuvchi /search komandasi ishlatishi kerak.
+${modeNote}
+QOBILIYAT: Matn va ovozli xabarlarni qabul qilaman. Ob-havo, eslatmalar, kontaktlar va xabar yuborish imkonim bor. Real vaqt ma'lumotlari uchun /search komandasi ishlatiladi.
 XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
@@ -242,12 +247,13 @@ function trimHistory(history: ChatMessage[]): { role: string; parts: { text: str
 export async function generateWithSearch(
   userText: string,
   history: ChatMessage[],
-  memory: UserMemory
+  memory: UserMemory,
+  mode: "text" | "voice" = "text"
 ): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
-    systemInstruction: buildSystemPrompt(memory),
+    systemInstruction: buildSystemPrompt(memory, mode),
     tools: [{ googleSearch: {} }] as any,
     generationConfig: { thinkingConfig: { thinkingBudget: 1024 } } as any,
   });
@@ -266,14 +272,15 @@ export async function generateReply(
   userText: string,
   history: ChatMessage[],
   memory: UserMemory,
-  userId: number
+  userId: number,
+  mode: "text" | "voice" = "text"
 ): Promise<string> {
   const safeText = userText.length > 2000 ? userText.slice(0, 2000) + "…" : userText;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
-    systemInstruction: buildSystemPrompt(memory),
+    systemInstruction: buildSystemPrompt(memory, mode),
     tools: [
       { functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool] },
     ] as any,

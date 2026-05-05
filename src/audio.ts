@@ -123,9 +123,20 @@ export async function textToSpeech(text: string): Promise<Buffer> {
     GEMINI_TIMEOUT_MS
   );
 
-  const data: string | undefined =
-    result?.response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (!data) throw new Error("TTS_NO_AUDIO");
+  const candidate = result?.response?.candidates?.[0];
+  const part = candidate?.content?.parts?.[0];
+  const data: string | undefined = part?.inlineData?.data;
+
+  if (!data) {
+    // Log actual response so we can debug in Cloud Run logs
+    console.error("[TTS] No audio data. Response:", JSON.stringify({
+      finishReason: candidate?.finishReason,
+      hasText: !!part?.text,
+      textPreview: part?.text?.slice(0, 100),
+      partKeys: part ? Object.keys(part) : null,
+    }));
+    throw new Error("TTS_NO_AUDIO");
+  }
 
   return pcm16ToMp3(Buffer.from(data, "base64"));
 }

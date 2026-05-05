@@ -202,7 +202,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
 
     let reply: string;
     try {
-      reply = await generateWithSearch(query, history, memory);
+      reply = await generateWithSearch(query, history, memory, mode);
     } catch (err) {
       console.error("generateWithSearch xatosi:", err);
       await sendMessage(chatId, geminiErrorMessage(err));
@@ -280,7 +280,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     // 2-qadam: transcribed matn → javob (xuddi matnli xabar kabi, tools bilan)
     let reply: string;
     try {
-      reply = await generateReply(transcribed, history, memory, userId);
+      reply = await generateReply(transcribed, history, memory, userId, mode);
     } catch (err) {
       console.error("generateReply (voice) xatosi:", err);
       await sendMessage(chatId, geminiErrorMessage(err));
@@ -303,7 +303,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
   if (text) {
     let reply: string;
     try {
-      reply = await generateReply(text, history, memory, userId);
+      reply = await generateReply(text, history, memory, userId, mode);
     } catch (err) {
       console.error("generateReply xatosi:", err);
       await sendMessage(chatId, geminiErrorMessage(err));
