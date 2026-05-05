@@ -78,7 +78,7 @@ if (signedIn) {
   console.log("━".repeat(60));
   console.log(session);
   console.log("━".repeat(60));
-  console.log("\n📋 Vercel Dashboard → Settings → Environment Variables ga boring:");
+  console.log("\n📋 GitHub → Settings → Secrets → Actions ga boring:");
   console.log("   Name:  TELEGRAM_SESSION");
   console.log("   Value: yuqoridagi string");
   console.log("\n⚠️  Bu stringni hech kim bilan ulashmang!\n");

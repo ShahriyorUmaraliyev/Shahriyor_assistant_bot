@@ -109,7 +109,7 @@ function geminiErrorMessage(err: unknown): string {
 
 function audioErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
-  console.error("[audioError] raw:", msg); // Vercel logda ko'rish uchun
+  console.error("[audioError] raw:", msg);
   if (msg.includes("AUDIO_TOO_LARGE"))
     return "📦 Audio fayl 20 MB dan katta. Qisqaroq xabar yuboring.";
   if (msg.includes("AUDIO_DOWNLOAD_TIMEOUT"))
@@ -179,7 +179,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
         "❌ Telegram hisobi ulanmagan.\n\n" +
         "Ulanish uchun lokal kompyuterda quyidagini bajaring:\n" +
         "```\nnode scripts/generate-session.mjs\n```\n" +
-        "Keyin chiqgan session stringni Vercel → Settings → Environment Variables ga\n" +
+        "Keyin chiqgan session stringni Cloud Run → Edit & Deploy → Environment Variables ga\n" +
         "`TELEGRAM_SESSION` nomi bilan qo'shing va redeploy qiling."
       );
     }

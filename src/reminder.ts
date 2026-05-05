@@ -1,8 +1,6 @@
 import { Client } from "@upstash/qstash";
 
-const APP_URL =
-  process.env.APP_URL?.replace(/\/$/, "") ??
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+const APP_URL = process.env.APP_URL?.replace(/\/$/, "") ?? null;
 
 // Lazy singleton — har chaqiruvda yangi Client yaratmaslik
 let _qstash: Client | null = null;
@@ -16,7 +14,7 @@ export async function scheduleReminder(
   text: string,
   time: string
 ): Promise<string> {
-  if (!APP_URL) throw new Error("APP_URL yoki VERCEL_URL sozlanmagan");
+  if (!APP_URL) throw new Error("APP_URL env o'zgaruvchisi sozlanmagan");
 
   const notBefore = Math.floor(new Date(time).getTime() / 1000);
   if (isNaN(notBefore)) throw new Error(`Noto'g'ri vaqt formati: ${time}`);
