@@ -1,0 +1,88 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  SERVICE: shahriyor-assist
+  REGION: us-central1
+  IMAGE: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/shahriyor/assist
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
+          docker push $IMAGE:${{ github.sha }}
+          docker push $IMAGE:latest
+
+      - name: Write env vars file
+        run: |
+          cat > env.yaml << 'EOF'
+          TELEGRAM_BOT_TOKEN: "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+          TELEGRAM_WEBHOOK_SECRET: "${{ secrets.TELEGRAM_WEBHOOK_SECRET }}"
+          ALLOWED_USER_IDS: "${{ secrets.ALLOWED_USER_IDS }}"
+          GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}"
+          UPSTASH_REDIS_REST_URL: "${{ secrets.UPSTASH_REDIS_REST_URL }}"
+          UPSTASH_REDIS_REST_TOKEN: "${{ secrets.UPSTASH_REDIS_REST_TOKEN }}"
+          QSTASH_TOKEN: "${{ secrets.QSTASH_TOKEN }}"
+          QSTASH_CURRENT_SIGNING_KEY: "${{ secrets.QSTASH_CURRENT_SIGNING_KEY }}"
+          QSTASH_NEXT_SIGNING_KEY: "${{ secrets.QSTASH_NEXT_SIGNING_KEY }}"
+          OPENWEATHERMAP_API_KEY: "${{ secrets.OPENWEATHERMAP_API_KEY }}"
+          TELEGRAM_API_ID: "${{ secrets.TELEGRAM_API_ID }}"
+          TELEGRAM_API_HASH: "${{ secrets.TELEGRAM_API_HASH }}"
+          TELEGRAM_SESSION: "${{ secrets.TELEGRAM_SESSION }}"
+          EOF
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        run: |
+          gcloud run deploy $SERVICE \
+            --image $IMAGE:${{ github.sha }} \
+            --platform managed \
+            --region $REGION \
+            --allow-unauthenticated \
+            --port 8080 \
+            --memory 512Mi \
+            --cpu 1 \
+            --min-instances 0 \
+            --max-instances 3 \
+            --timeout 300 \
+            --env-vars-file env.yaml
+
+          SERVICE_URL=$(gcloud run services describe $SERVICE \
+            --region=$REGION \
+            --format='value(status.url)')
+          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "✅ Deployed: $SERVICE_URL"
+
+      - name: Set APP_URL in Cloud Run
+        run: |
+          gcloud run services update $SERVICE \
+            --region=$REGION \
+            --update-env-vars APP_URL=${{ steps.deploy.outputs.url }}
+
+      - name: Register Telegram webhook
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          APP_URL: ${{ steps.deploy.outputs.url }}
+        run: node scripts/register-webhook.mjs

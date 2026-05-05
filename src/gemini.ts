@@ -12,8 +12,8 @@ function getGenAI(): GoogleGenerativeAI {
   return _genAI;
 }
 
-// Vercel limit 30s — Gemini ga 25s beramiz
-export const GEMINI_TIMEOUT_MS = 25_000;
+// Cloud Run timeout 300s — Gemini ga 50s beramiz (ovozli xabar pipeline uchun yetarli)
+export const GEMINI_TIMEOUT_MS = 50_000;
 
 export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
