@@ -237,9 +237,46 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
 
   if (text === "/memory") {
     const memory = await getMemory(userId);
-    let json = JSON.stringify(memory, null, 2);
-    if (json.length > 4000) json = json.slice(0, 4000) + "\n... (qisqartirildi)";
-    await sendMessage(chatId, `📦 *Joriy xotira:*\n\`\`\`json\n${json}\n\`\`\``);
+    const lines: string[] = ["📦 *Joriy xotira:*\n"];
+
+    // Kontaktlar
+    const contacts = Object.entries(memory.contacts ?? {});
+    if (contacts.length > 0) {
+      lines.push("👥 *Kontaktlar:*");
+      for (const [name, data] of contacts) {
+        const phone = data.phone ? `📞 ${data.phone}` : "";
+        const notes = data.notes ? ` — ${data.notes}` : "";
+        lines.push(`• ${name}${phone ? ": " + phone : ""}${notes}`);
+      }
+    } else {
+      lines.push("👥 *Kontaktlar:* yo'q");
+    }
+
+    // Mahsulotlar
+    const products = Object.entries(memory.products ?? {});
+    if (products.length > 0) {
+      lines.push("\n🛍 *Mahsulotlar:*");
+      for (const [name, data] of products) {
+        const price = data.price ? `${data.price.toLocaleString()} so'm` : "";
+        const desc = data.description ? ` — ${data.description}` : "";
+        lines.push(`• ${name}${price ? ": " + price : ""}${desc}`);
+      }
+    } else {
+      lines.push("\n🛍 *Mahsulotlar:* yo'q");
+    }
+
+    // Yozuvlar
+    const notes = memory.notes ?? [];
+    if (notes.length > 0) {
+      lines.push("\n📝 *Yozuvlar:*");
+      notes.slice(-10).forEach((n, i) => lines.push(`${i + 1}. ${n}`));
+    } else {
+      lines.push("\n📝 *Yozuvlar:* yo'q");
+    }
+
+    let result = lines.join("\n");
+    if (result.length > 4000) result = result.slice(0, 4000) + "\n...";
+    await sendMessage(chatId, result);
     return;
   }
 
