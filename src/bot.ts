@@ -83,6 +83,8 @@ async function sendVoiceMessage(chatId: number, mp3Buffer: Buffer): Promise<void
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+      // VOICE_MESSAGES_FORBIDDEN — Telegram sozlamalarida ovozli xabarlar o'chirilgan
+      if (body.includes("VOICE_MESSAGES_FORBIDDEN")) throw new Error("VOICE_MESSAGES_FORBIDDEN");
       throw new Error(`Telegram sendVoice xatosi: ${res.status} — ${body.slice(0, 200)}`);
     }
   } catch (err) {
@@ -223,7 +225,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       { role: "model", text: reply, timestamp: Date.now() },
     ]).catch(console.error);
 
-    await deliverReply(chatId, reply, mode);
+    await deliverReply(chatId, reply, mode, userId);
     return;
   }
 
@@ -302,7 +304,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       { role: "model", text: reply, timestamp: Date.now() },
     ]).catch(console.error);
 
-    await deliverReply(chatId, reply, mode);
+    await deliverReply(chatId, reply, mode, userId);
     return;
   }
 
@@ -324,7 +326,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       { role: "model", text: reply, timestamp: Date.now() },
     ]).catch(console.error);
 
-    await deliverReply(chatId, reply, mode);
+    await deliverReply(chatId, reply, mode, userId);
   }
 }
 
@@ -333,7 +335,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
 async function deliverReply(
   chatId: number,
   text: string,
-  mode: "text" | "voice"
+  mode: "text" | "voice",
+  userId?: number
 ): Promise<void> {
   if (text.length > 4000) {
     text = text.slice(0, 4000) + "\n\n... [Xabar uzunligi sababli qisqartirildi]";
@@ -361,9 +364,19 @@ async function deliverReply(
     const mp3 = await textToSpeech(ttsText);
     await sendVoiceMessage(chatId, mp3);
   } catch (err) {
-    // TTS ishlamasa — foydalanuvchiga ko'rinmas, faqat log; toza matn yuboriladi
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[TTS] FAILED (${errMsg}) — falling back to text`);
+
+    // Telegram ovozli xabarlarni taqiqlagan — avtomatik matn rejimiga o'tish
+    if (errMsg.includes("VOICE_MESSAGES_FORBIDDEN") && userId) {
+      await setUserMode(userId, "text");
+      await sendMessage(
+        chatId,
+        "⚠️ Telegram ovozli xabarlar yuborishga ruxsat bermadi.\n" +
+        "💬 Matn rejimiga o'tkazildi.\n\n" +
+        "_Telegram → Settings → Privacy → Voice Messages → Everyone_"
+      );
+    }
     await sendMessage(chatId, text);
   }
 }
