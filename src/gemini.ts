@@ -341,6 +341,24 @@ export async function generateWithSearch(
 
   const text = result.response.text()?.trim();
   if (!text) return "🔍 Qidiruv natijasi topilmadi. Boshqacha so'rab ko'ring.";
+
+  // Grounding metadata dan manba havolalarini olish
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const meta = (result.response as any).candidates?.[0]?.groundingMetadata;
+  const chunks: Array<{ web?: { uri?: string; title?: string } }> =
+    meta?.groundingChunks ?? [];
+
+  const sources = chunks
+    .map((c) => c.web)
+    .filter((w): w is { uri: string; title: string } => !!(w?.uri && w?.title))
+    // duplicate uri lar olib tashlanadi
+    .filter((w, i, arr) => arr.findIndex((x) => x.uri === w.uri) === i)
+    .slice(0, 5) // max 5 ta havola
+    .map((w) => `• [${w.title}](${w.uri})`);
+
+  if (sources.length > 0) {
+    return `${text}\n\n📎 *Manbalar:*\n${sources.join("\n")}`;
+  }
   return text;
 }
 
