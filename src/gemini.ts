@@ -260,8 +260,8 @@ export async function handleTool(
     if (!contact.startsWith("+") && !contact.startsWith("@")) {
       const memory = await getMemory(userId);
       const lower = contact.toLowerCase();
-      for (const [name, data] of Object.entries(memory.contacts)) {
-        if (name.toLowerCase().includes(lower) || lower.includes(name.toLowerCase())) {
+      for (const [cname, data] of Object.entries(memory.contacts)) {
+        if (cname.toLowerCase().includes(lower) || lower.includes(cname.toLowerCase())) {
           if (data.phone) { recipient = data.phone; break; }
         }
       }

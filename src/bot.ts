@@ -225,7 +225,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       { role: "model", text: reply, timestamp: Date.now() },
     ]).catch(console.error);
 
-    await deliverReply(chatId, reply, mode, userId);
+    // Search natijalari (link, markdown, citation) ovoz sifatida mantiqsiz — har doim matn
+    await deliverReply(chatId, reply, "text", userId);
     return;
   }
 

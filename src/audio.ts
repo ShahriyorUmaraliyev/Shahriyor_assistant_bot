@@ -59,10 +59,8 @@ export async function downloadVoice(
 }
 
 // ─── 2. Audio Input: OGG → matn (transcription) ──────────────────────────────
-// gemini-2.0-flash: transcription uchun yetarli va arzonroq (2.5-flash thinking
-// tokenlari bu yerda keraksiz). generateContent() — startChat()+tools+audio
-// kombinatsiyasidan farqli ishonchli. contents explicit — Part[] shorthand bilan
-// audio SDK tomonidan o'tkazib yuboriladi.
+// gemini-2.5-flash + thinkingBudget:0: audio input qo'llab-quvvatlaydi, arzon.
+// generateContent() — startChat()+tools+audio kombinatsiyasidan ishonchliroq.
 
 export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
   // gemini-2.5-flash: audio input qo'llab-quvvatlaydi; thinkingBudget:0 bilan
@@ -115,38 +113,40 @@ export async function textToSpeech(text: string): Promise<Buffer> {
     `https://generativelanguage.googleapis.com/v1beta/models/` +
     `${TTS_MODEL}:generateContent?key=${apiKey}`;
 
+  // withRetry ichida status tekshiruvi ham bor — 429 retry bo'ladi
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let json: any;
   try {
-    const res = await withRetry(() =>
+    json = await withRetry(() =>
       withTimeout(
-        fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text }] }],
-            generationConfig: {
-              responseModalities: ["AUDIO"],
-              speechConfig: {
-                voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
+        (async () => {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ role: "user", parts: [{ text }] }],
+              generationConfig: {
+                responseModalities: ["AUDIO"],
+                speechConfig: {
+                  voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
+                },
               },
-            },
-          }),
-        }),
+            }),
+          });
+          if (!res.ok) {
+            const errBody = await res.text().catch(() => "");
+            console.error(`[TTS] HTTP ${res.status}:`, errBody.slice(0, 300));
+            // 429 ni throw qilsak withRetry uni ushlab qayta urinadi
+            throw new Error(`${res.status} TTS_HTTP`);
+          }
+          return res.json();
+        })(),
         GEMINI_TIMEOUT_MS
       )
     );
-
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => "");
-      console.error(`[TTS] HTTP ${res.status}:`, errBody.slice(0, 300));
-      if (res.status === 429) throw new Error("429 TTS rate limit");
-      throw new Error(`TTS_HTTP_${res.status}`);
-    }
-
-    json = await res.json();
   } catch (err) {
-    if ((err as Error).message?.includes("GEMINI_TIMEOUT")) throw new Error("GEMINI_TIMEOUT");
+    const msg = (err as Error).message ?? "";
+    if (msg.includes("GEMINI_TIMEOUT")) throw new Error("GEMINI_TIMEOUT");
     throw err;
   }
 
