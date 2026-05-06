@@ -1,5 +1,6 @@
 import "dotenv/config";
 import app from "./app";
+import { setupBotCommands } from "./bot";
 
 // ─── Startup validation — kerakli tokenlar yo'q bo'lsa darhol to'xtat ────────
 
@@ -33,4 +34,5 @@ const PORT = Number(process.env.PORT) || 9000;
 
 app.listen(PORT, () => {
   console.log(`✅ Server port ${PORT} da ishlamoqda`);
+  setupBotCommands().then(() => console.log("✅ Bot komandalar ro'yxatga olindi"));
 });

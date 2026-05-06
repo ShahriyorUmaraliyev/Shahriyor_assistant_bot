@@ -12,7 +12,7 @@
  */
 
 import "dotenv/config";
-import { handleMessage } from "./bot";
+import { handleMessage, setupBotCommands } from "./bot";
 import type { TelegramUpdate } from "./types";
 
 // ─── Env validation (faqat polling uchun keraklilari) ────────────────────────
@@ -110,7 +110,10 @@ function sleep(ms: number): Promise<void> {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
-deleteWebhook().then(poll).catch((err) => {
-  console.error("❌ Start xatosi:", err);
-  process.exit(1);
-});
+deleteWebhook()
+  .then(() => setupBotCommands())
+  .then(poll)
+  .catch((err) => {
+    console.error("❌ Start xatosi:", err);
+    process.exit(1);
+  });

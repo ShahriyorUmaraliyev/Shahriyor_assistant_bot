@@ -39,17 +39,55 @@ async function tgFetch(url: string, init: RequestInit): Promise<Response> {
   }
 }
 
-export async function sendMessage(chatId: number, text: string): Promise<void> {
+// ─── Doimiy klaviatura (reply keyboard) ──────────────────────────────────────
+
+const MAIN_KEYBOARD = {
+  keyboard: [
+    [{ text: "🔍 /search" }, { text: "📦 /memory" }],
+    [{ text: "🔊 /voice"  }, { text: "💬 /text"   }],
+    [{ text: "🗑 /clear"  }, { text: "🔗 /auth_tg" }],
+  ],
+  resize_keyboard: true,
+  persistent: true,
+};
+
+// ─── Bot komandalarini Telegram ga ro'yxatdan o'tkazish ───────────────────────
+
+export async function setupBotCommands(): Promise<void> {
+  await tgFetch(`${TG}/setMyCommands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      commands: [
+        { command: "search",  description: "🔍 Google orqali real vaqt qidiruv" },
+        { command: "voice",   description: "🔊 Ovozli javob rejimini yoqish"    },
+        { command: "text",    description: "💬 Matnli javob rejimini yoqish"    },
+        { command: "memory",  description: "📦 Saqlangan xotirani ko'rish"      },
+        { command: "clear",   description: "🗑 Suhbat tarixini tozalash"        },
+        { command: "auth_tg", description: "🔗 Telegram hisobi holati"          },
+      ],
+    }),
+  }).catch((err) => console.error("[setupBotCommands] xato:", err));
+}
+
+export async function sendMessage(
+  chatId: number,
+  text: string,
+  extra?: Record<string, unknown>
+): Promise<void> {
+  const base = { chat_id: chatId, text, parse_mode: "Markdown", ...extra };
   let res = await tgFetch(`${TG}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
+    body: JSON.stringify(base),
   });
   if (!res.ok) {
+    // parse_mode xatosi bo'lsa — markdown'siz qayta urinish
+    const plain = { chat_id: chatId, text, ...extra };
     res = await tgFetch(`${TG}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text }),
+      body: JSON.stringify(plain),
     });
     if (!res.ok) {
       console.error(`Telegram xatosi: ${await res.text()}`);
@@ -148,7 +186,9 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     return;
   }
 
-  const text = message.text?.trim();
+  // Tugma matnlarini komandaga aylantirish (masalan "🔍 /search" → "/search")
+  const rawText = message.text?.trim();
+  const text = rawText?.replace(/^[\p{Emoji}\s]+\//u, "/") ?? rawText;
   const voice = message.voice;
 
   if (!text && !voice) {
@@ -162,14 +202,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     await sendMessage(
       chatId,
       "Salom! Men *Shahriyor Assist* — sizning shaxsiy AI assistantingizman 🤖\n\n" +
-        "• Ovozli xabar yuboring — tushunib javob beraman\n" +
-        "• /search \\<so'rov\\> — Google orqali real vaqt qidiruv\n" +
-        "• /voice — ovozli javob rejimi\n" +
-        "• /text — matn javob rejimi\n" +
-        "• /clear — suhbat tarixini tozalash\n" +
-        "• /memory — joriy xotirani ko'rish\n" +
-        "• /auth\\_tg — Telegram hisobi holati\n\n" +
-        "Savolingizni yozing yoki ovozli xabar yuboring!"
+      "Quyidagi tugmalar yoki komandalar orqali boshqaring:",
+      { reply_markup: MAIN_KEYBOARD }
     );
     return;
   }
