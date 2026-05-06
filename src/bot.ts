@@ -330,6 +330,38 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
   }
 }
 
+// ─── Ovozli rejim uchun AI disclaimer filtri ─────────────────────────────────
+// AI training datasi "men ovozli xabar yubora olmayman" deydi — bu noto'g'ri.
+// System prompt yetarli bo'lmasa — kod darajasida ushlaydi.
+
+function filterVoiceDisclaimers(text: string): string {
+  const low = text.toLowerCase();
+  const hasDisclaimer =
+    (low.includes("ovozli") && (low.includes("olmayman") || low.includes("imkonim yo") || low.includes("yuborolmayman"))) ||
+    (low.includes("faqat matn") && low.includes("yubor")) ||
+    (low.includes("voice") && (low.includes("cannot") || low.includes("unable") || low.includes("can't")));
+
+  if (!hasDisclaimer) return text;
+
+  console.warn("[VoiceFilter] AI disclaimer aniqlandi, filtrlanyapti");
+
+  // Disclaimer o'z ichiga olgan gaplarni o'chiramiz
+  const cleaned = text
+    .split(/(?<=[.!?])\s+/)
+    .filter(sentence => {
+      const s = sentence.toLowerCase();
+      return !(
+        (s.includes("ovozli") && (s.includes("olmayman") || s.includes("imkonim yo") || s.includes("yuborolmayman"))) ||
+        (s.includes("faqat matn") && s.includes("yubor")) ||
+        (s.includes("voice") && (s.includes("cannot") || s.includes("unable") || s.includes("can't")))
+      );
+    })
+    .join(" ")
+    .trim();
+
+  return cleaned || "Bajarildi.";
+}
+
 // ─── Reply delivery: matn yoki ovoz ──────────────────────────────────────────
 
 async function deliverReply(
@@ -347,7 +379,10 @@ async function deliverReply(
     return;
   }
 
-  // TTS uchun markdown belgilarini tozalaymiz — aks holda "yulduzcha yulduzcha
+  // 1: AI disclaimer filtri — "yubora olmayman" kabi noto'g'ri gaplarni o'chirish
+  text = filterVoiceDisclaimers(text);
+
+  // 2: TTS uchun markdown belgilarini tozalaymiz — aks holda "yulduzcha yulduzcha
   // matn yulduzcha yulduzcha" deb o'qiladi
   const cleaned = text
     .replace(/\*\*(.+?)\*\*/g, "$1")         // **bold** → bold

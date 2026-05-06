@@ -100,11 +100,10 @@ export function buildSystemPrompt(memory: UserMemory, mode: "text" | "voice" = "
   });
 
   const modeNote = mode === "voice"
-    ? `JORIY REJIM: OVOZLI (muhim — arxitekturani tushun):
-- Sen FAQAT matn yozasan. Sistema sening matnini AVTOMATIK ovozga aylantirib yuboradi.
-- Demak sen har doim ovozli xabar "yuborayapsan" — bu texnik jihatdan doim ishlaydi.
-- HECH QACHON "ovozli xabar yubora olmayman", "faqat matn yuboraman", "bu imkoniyatim yo'q" dema.
-- Foydalanuvchi "ovozli xabar yubor X deb" desa — shunchaki X ni matn sifatida yoz, u ovozga aylanadi.`
+    ? `JORIY REJIM: OVOZLI.
+TEXNIK ARXITEKTURA: sen faqat matn yozasan → sistema uni TTS orqali AVTOMATIK ovozga aylantiradi → Telegram ovozli xabar sifatida yuboradi. Bu jarayon har doim ishlaydi.
+QOIDA: hech qachon "ovozli xabar yubora olmayman" / "faqat matn" / "imkonim yo'q" dema — bu mutlaqo noto'g'ri.
+MISOL: foydalanuvchi "salom deb ovozli xabar yubor" desa → sen shunchaki "Salom!" deb yoz → sistema ovozga aylantiradi.`
     : "JORIY REJIM: MATN — javoblar matn sifatida keladi. /voice buyrug'i bilan ovozli rejimga o'tish mumkin.";
 
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
