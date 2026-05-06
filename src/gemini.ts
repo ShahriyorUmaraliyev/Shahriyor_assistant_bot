@@ -268,16 +268,27 @@ export async function generateWithSearch(
     // Grounding results are already factual — thinking tokens not needed
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
   });
-  const chat = model.startChat({ history: trimHistory(history) });
+
+  // generateContent (startChat emas) — Google grounding uchun tavsiya etilgan usul.
+  // Oxirgi 4 history xabari: ko'proq context keraksiz, faqat yangi qidiruv muhim.
+  const recentHistory = trimHistory(history).slice(-4);
   const result = await withRetry(() =>
-    withTimeout(chat.sendMessage(userText), GEMINI_TIMEOUT_MS)
+    withTimeout(
+      model.generateContent({
+        contents: [
+          ...recentHistory,
+          { role: "user", parts: [{ text: userText }] },
+        ],
+      } as any),
+      GEMINI_TIMEOUT_MS
+    )
   );
+
   logTokenUsage("search", result.response as any);
-  try {
-    return result.response.text() || "Bajarildi.";
-  } catch {
-    return "Vazifa bajarildi, lekin matnli javob yaratilmadi.";
-  }
+
+  const text = result.response.text()?.trim();
+  if (!text) return "🔍 Qidiruv natijasi topilmadi. Boshqacha so'rab ko'ring.";
+  return text;
 }
 
 export async function generateReply(

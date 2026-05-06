@@ -203,6 +203,9 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       getUserMode(userId),
     ]);
 
+    // Telegram typing 5s da o'chadi — search 10-30s oladi, har 4s da yangilaymiz
+    const typingTimer = setInterval(() => sendTyping(chatId).catch(() => {}), 4_000);
+
     let reply: string;
     try {
       reply = await generateWithSearch(query, history, memory, mode);
@@ -210,11 +213,13 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       console.error("generateWithSearch xatosi:", err);
       await sendMessage(chatId, geminiErrorMessage(err));
       return;
+    } finally {
+      clearInterval(typingTimer);
     }
 
     await saveHistory(userId, [
       ...history,
-      { role: "user", text: `🔍 ${query}`, timestamp: Date.now() },
+      { role: "user", text: query, timestamp: Date.now() },
       { role: "model", text: reply, timestamp: Date.now() },
     ]).catch(console.error);
 
@@ -339,7 +344,19 @@ async function deliverReply(
     return;
   }
 
-  const ttsText = text.length > 800 ? text.slice(0, 800) + "…" : text;
+  // TTS uchun markdown belgilarini tozalaymiz — aks holda "yulduzcha yulduzcha
+  // matn yulduzcha yulduzcha" deb o'qiladi
+  const cleaned = text
+    .replace(/\*\*(.+?)\*\*/g, "$1")         // **bold** → bold
+    .replace(/\*(.+?)\*/g, "$1")             // *italic* → italic
+    .replace(/`{1,3}[^`]*`{1,3}/g, "")      // `code` va ```block``` → o'chirish
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [text](url) → text
+    .replace(/_{1,2}(.+?)_{1,2}/g, "$1")     // _italic_ → italic
+    .replace(/#+\s*/g, "")                    // # Heading → Heading
+    .replace(/\n{3,}/g, "\n\n")              // 3+ qator bo'shliq → 2
+    .trim();
+
+  const ttsText = cleaned.length > 800 ? cleaned.slice(0, 800) + "…" : cleaned;
   try {
     const mp3 = await textToSpeech(ttsText);
     await sendVoiceMessage(chatId, mp3);
