@@ -100,7 +100,10 @@ export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
   return text;
 }
 
-// ─── 3. Audio Output: Matn → Gemini TTS → MP3 ────────────────────────────────
+// ─── 3. Audio Output: Matn → Gemini TTS → WAV ────────────────────────────────
+// lamejs (MP3) ishlatilmaydi — Node.js da MPEGMode not defined xatosi beradi.
+// WAV = 44-byte header + raw PCM16 — hech qanday kutubxona shart emas.
+// Telegram sendVoice WAV formatini qabul qiladi.
 
 export async function textToSpeech(text: string): Promise<Buffer> {
   const model = getGenAI().getGenerativeModel({ model: "gemini-2.5-flash-preview-tts" });
@@ -129,63 +132,53 @@ export async function textToSpeech(text: string): Promise<Buffer> {
   const data: string | undefined = part?.inlineData?.data;
 
   if (!data) {
-    // To'liq diagnostika — konsolda ko'ring, muammoni aniqlang
     console.error("[TTS] Audio data yo'q! Sabab:", JSON.stringify({
       candidatesCount: candidates?.length ?? 0,
-      finishReason: candidate?.finishReason ?? "yo'q (candidates bo'sh)",
+      finishReason: candidate?.finishReason ?? "candidates bo'sh",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       promptFeedback: (result?.response as any)?.promptFeedback ?? null,
       mimeType: part?.inlineData?.mimeType ?? null,
       hasText: !!part?.text,
       textPreview: part?.text?.slice(0, 200) ?? null,
-      partKeys: part ? Object.keys(part) : null,
-      rawCandidates: JSON.stringify(candidates).slice(0, 500),
     }));
     throw new Error("TTS_NO_AUDIO");
   }
 
+  // MIME type "audio/L16;codec=pcm;rate=24000" dan sample rate ni ajratib olamiz
   const mimeType: string = part?.inlineData?.mimeType ?? "audio/pcm";
-  if (!mimeType.startsWith("audio/pcm") && !mimeType.startsWith("audio/l16")) {
-    console.error(`[TTS] Kutilmagan format: "${mimeType}" — PCM kutilmoqda, audio buzilishi mumkin`);
-  }
+  const rateMatch = mimeType.match(/rate=(\d+)/i);
+  const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24_000;
 
-  return pcm16ToMp3(Buffer.from(data, "base64"));
+  return pcm16ToWav(Buffer.from(data, "base64"), sampleRate);
 }
 
-// ─── PCM16 → MP3 (lamejs, pure JS) ───────────────────────────────────────────
+// ─── PCM16 → WAV (kutubxonasiz, faqat header + data) ─────────────────────────
+// Gemini TTS "audio/L16;codec=pcm;rate=24000" formatida PCM16 qaytaradi.
+// WAV = RIFF header (44 bayt) + raw PCM16 ma'lumot.
 
-function pcm16ToMp3(pcmBuffer: Buffer): Buffer {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const lamejs = require("lamejs") as {
-    Mp3Encoder: new (
-      channels: number,
-      sampleRate: number,
-      kbps: number
-    ) => {
-      encodeBuffer(left: Int16Array): Int8Array;
-      flush(): Int8Array;
-    };
-  };
+function pcm16ToWav(pcmBuffer: Buffer, sampleRate: number = 24_000): Buffer {
+  const CHANNELS    = 1;
+  const BITS        = 16;
+  const byteRate    = sampleRate * CHANNELS * BITS / 8;
+  const blockAlign  = CHANNELS * BITS / 8;
+  const dataSize    = pcmBuffer.length;
 
-  const SAMPLE_RATE = 24_000; // Gemini TTS: 24 kHz
-  const BLOCK = 1152;          // lamejs chunk size
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);              // fmt chunk size
+  header.writeUInt16LE(1, 20);               // PCM = 1
+  header.writeUInt16LE(CHANNELS, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(BITS, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataSize, 40);
 
-  const encoder = new lamejs.Mp3Encoder(1, SAMPLE_RATE, 64);
-  const samples = new Int16Array(
-    pcmBuffer.buffer,
-    pcmBuffer.byteOffset,
-    pcmBuffer.byteLength / 2
-  );
-  const chunks: Buffer[] = [];
-
-  for (let i = 0; i < samples.length; i += BLOCK) {
-    const buf = encoder.encodeBuffer(samples.subarray(i, Math.min(i + BLOCK, samples.length)));
-    if (buf.length > 0) chunks.push(Buffer.from(buf));
-  }
-
-  const tail = encoder.flush();
-  if (tail.length > 0) chunks.push(Buffer.from(tail));
-
-  const mp3 = Buffer.concat(chunks);
-  if (mp3.length === 0) throw new Error("TTS_NO_AUDIO");
-  return mp3;
+  const wav = Buffer.concat([header, pcmBuffer]);
+  if (wav.length <= 44) throw new Error("TTS_NO_AUDIO");
+  return wav;
 }

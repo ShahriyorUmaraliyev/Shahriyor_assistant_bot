@@ -70,8 +70,8 @@ async function sendVoiceMessage(chatId: number, mp3Buffer: Buffer): Promise<void
   form.append("chat_id", String(chatId));
   form.append(
     "voice",
-    new Blob([mp3Buffer], { type: "audio/mpeg" }),
-    "reply.mp3"
+    new Blob([mp3Buffer], { type: "audio/wav" }),
+    "reply.wav"
   );
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15_000); // fayl yuklash uchun 15 sek
