@@ -36,6 +36,26 @@ export async function sendUserMessage(uid: number, to: string, message: string):
   if (sendError) throw sendError;
 }
 
+// ─── Send voice message ───────────────────────────────────────────────────────
+
+export async function sendUserVoiceMessage(uid: number, to: string, audioBuffer: Buffer): Promise<void> {
+  const client = makeClient();
+  await client.connect();
+  let sendError: unknown;
+  try {
+    // voiceNote: true — Telegram da mikrofon belgisi bilan ko'rinadi
+    await client.sendFile(to, {
+      file: audioBuffer,
+      voiceNote: true,
+      forceDocument: false,
+    });
+  } catch (err) {
+    sendError = err;
+  }
+  await client.disconnect().catch((e) => console.error("TelegramClient disconnect xatosi:", e));
+  if (sendError) throw sendError;
+}
+
 export async function hasSession(_uid: number): Promise<boolean> {
   return !!(process.env.TELEGRAM_SESSION);
 }

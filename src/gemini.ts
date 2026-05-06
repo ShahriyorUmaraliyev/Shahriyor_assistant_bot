@@ -114,8 +114,9 @@ XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
 - vaqtli eslatma → set_reminder (ISO 8601 +05:00) | "ertaga"=ertangi kun | soat yo'q: ertalab=09:00, tush=14:00, kech=18:00 | "soat 1-11" = kechqurun (13:00-23:00), ya'ni "soat 3"=15:00, "soat 9"=21:00
-- kontaktga xabar yuborish → send_message (xotirada telefon bo'lishi shart; /auth_tg bilan hisob ulanmagan bo'lsa ayta)
-- MUHIM: eslatmalar (set_reminder) FAQAT Shahriyorning o'ziga keladi. Boshqalarga xabar yuborish uchun send_message ishlatiladi.`;
+- kontaktga MATNLI xabar yuborish → send_message (xotirada telefon bo'lishi shart; /auth_tg ulanmagan bo'lsa ayta)
+- kontaktga OVOZLI xabar yuborish → send_voice_message (xuddi send_message kabi, lekin audio sifatida yetkaziladi)
+- MUHIM: eslatmalar (set_reminder) FAQAT Shahriyorning o'ziga keladi. Boshqalarga xabar yuborish uchun send_message yoki send_voice_message ishlatiladi.`;
 }
 
 // ─── Tool Declarations ────────────────────────────────────────────────────────
@@ -185,7 +186,7 @@ export const getWeatherTool = {
 export const sendMessageTool = {
   name: "send_message",
   description:
-    "Foydalanuvchi (Shahriyor) nomidan kontaktga Telegram xabar yuborish. " +
+    "Foydalanuvchi (Shahriyor) nomidan kontaktga Telegram MATNLI xabar yuborish. " +
     "Hisobi /auth_tg orqali ulanган bo'lishi kerak. Kontakt telefon xotirada saqlangan bo'lishi kerak.",
   parameters: {
     type: SchemaType.OBJECT,
@@ -197,6 +198,28 @@ export const sendMessageTool = {
       message: {
         type: SchemaType.STRING,
         description: "Yuboriladigan xabar matni",
+      },
+    },
+    required: ["contact", "message"],
+  },
+};
+
+export const sendVoiceMessageTool = {
+  name: "send_voice_message",
+  description:
+    "Foydalanuvchi (Shahriyor) nomidan kontaktga Telegram OVOZLI xabar yuborish. " +
+    "'X ga ovozli xabar yubor', 'ovozli ayt', 'audio xabar jo'nat' so'rovlarida ishlatiladi. " +
+    "Xotirada telefon bo'lishi va /auth_tg orqali hisob ulanган bo'lishi kerak.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      contact: {
+        type: SchemaType.STRING,
+        description: "Kontakt ismi (xotiradagidan telefon topiladi), yoki to'g'ridan telefon (+998...) yoki @username",
+      },
+      message: {
+        type: SchemaType.STRING,
+        description: "Ovozga aylantirib yuborish uchun matn. Qisqa va aniq bo'lsin (max 800 belgi).",
       },
     },
     required: ["contact", "message"],
@@ -247,6 +270,29 @@ export async function handleTool(
     }
     await sendUserMessage(userId, recipient, message);
     return `Xabar yuborildi.`;
+  }
+  if (name === "send_voice_message") {
+    const { contact, message } = args as { contact: string; message: string };
+    let recipient = contact;
+    // Telefon/username bo'lmasa — xotiradan qidirish
+    if (!contact.startsWith("+") && !contact.startsWith("@")) {
+      const memory = await getMemory(userId);
+      const lower = contact.toLowerCase();
+      for (const [cname, data] of Object.entries(memory.contacts)) {
+        if (cname.toLowerCase().includes(lower) || lower.includes(cname.toLowerCase())) {
+          if (data.phone) { recipient = data.phone; break; }
+        }
+      }
+      if (recipient === contact)
+        return `"${contact}" kontaktining telefon raqami xotirada topilmadi. Avval kontakt raqamini saqlang.`;
+    }
+    // Dynamic import — audio.ts gemini.ts dan import qiladi, sirkular importni oldini olish
+    const { textToSpeech } = await import("./audio");
+    const { sendUserVoiceMessage } = await import("./userclient");
+    const safeMsg = message.slice(0, 800);
+    const audioBuffer = await textToSpeech(safeMsg);
+    await sendUserVoiceMessage(userId, recipient, audioBuffer);
+    return `Ovozli xabar yuborildi: "${safeMsg.slice(0, 50)}${safeMsg.length > 50 ? "…" : ""}"`;
   }
   return "Noma'lum funksiya.";
 }
@@ -312,7 +358,7 @@ export async function generateReply(
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(memory, mode),
     tools: [
-      { functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool] },
+      { functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool, sendVoiceMessageTool] },
     ] as any,
     // Tool calls don't benefit from thinking — disable to save tokens
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
