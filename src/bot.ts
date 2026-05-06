@@ -59,6 +59,7 @@ export async function setupBotCommands(): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       commands: [
+        { command: "start",   description: "🤖 Botni ishga tushirish / menyu"   },
         { command: "search",  description: "🔍 Google orqali real vaqt qidiruv" },
         { command: "voice",   description: "🔊 Ovozli javob rejimini yoqish"    },
         { command: "text",    description: "💬 Matnli javob rejimini yoqish"    },
