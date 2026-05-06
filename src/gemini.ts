@@ -77,12 +77,16 @@ export async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T
 
 function compactMemory(memory: UserMemory): string {
   const parts: string[] = [];
-  if (memory.contacts && Object.keys(memory.contacts).length > 0)
-    parts.push(`contacts:${JSON.stringify(memory.contacts)}`);
-  if (memory.products && Object.keys(memory.products).length > 0)
-    parts.push(`products:${JSON.stringify(memory.products)}`);
-  if (memory.notes && memory.notes.length > 0)
-    parts.push(`notes:${JSON.stringify(memory.notes)}`);
+  // Max 30 kontakt, 30 mahsulot, 10 oxirgi yozuv — system prompt portlamasligi uchun
+  const contacts = Object.entries(memory.contacts ?? {}).slice(-30);
+  const products = Object.entries(memory.products ?? {}).slice(-30);
+  const notes    = (memory.notes ?? []).slice(-10);
+  if (contacts.length > 0)
+    parts.push(`contacts:${JSON.stringify(Object.fromEntries(contacts))}`);
+  if (products.length > 0)
+    parts.push(`products:${JSON.stringify(Object.fromEntries(products))}`);
+  if (notes.length > 0)
+    parts.push(`notes:${JSON.stringify(notes)}`);
   return parts.length > 0 ? parts.join("\n") : "(bo'sh)";
 }
 
@@ -270,8 +274,8 @@ export async function generateWithSearch(
   });
 
   // generateContent (startChat emas) — Google grounding uchun tavsiya etilgan usul.
-  // Oxirgi 4 history xabari: ko'proq context keraksiz, faqat yangi qidiruv muhim.
-  const recentHistory = trimHistory(history).slice(-4);
+  // Oxirgi 2 history xabari: search o'zi yangi ma'lumot beradi, ko'p context keraksiz.
+  const recentHistory = trimHistory(history).slice(-2);
   const result = await withRetry(() =>
     withTimeout(
       model.generateContent({
@@ -311,7 +315,8 @@ export async function generateReply(
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
   });
 
-  const chat = model.startChat({ history: trimHistory(history) });
+  // Oxirgi 6 xabar (3 almashuv) — kontekst uchun yetarli, ortiqcha token sarflanmaydi
+  const chat = model.startChat({ history: trimHistory(history).slice(-6) });
 
   let result = await withRetry(() =>
     withTimeout(chat.sendMessage(safeText), GEMINI_TIMEOUT_MS)
