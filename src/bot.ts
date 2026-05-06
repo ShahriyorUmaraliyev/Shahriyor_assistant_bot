@@ -361,10 +361,9 @@ async function deliverReply(
     const mp3 = await textToSpeech(ttsText);
     await sendVoiceMessage(chatId, mp3);
   } catch (err) {
-    console.error("TTS xatosi:", err);
-    await sendMessage(
-      chatId,
-      `🔇 _Ovozli javob yaratib bo'lmadi — matn sifatida:_\n\n${text}`
-    );
+    // TTS ishlamasa — foydalanuvchiga ko'rinmas, faqat log; toza matn yuboriladi
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`[TTS] FAILED (${errMsg}) — falling back to text`);
+    await sendMessage(chatId, text);
   }
 }
