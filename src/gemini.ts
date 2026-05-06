@@ -100,13 +100,17 @@ export function buildSystemPrompt(memory: UserMemory, mode: "text" | "voice" = "
   });
 
   const modeNote = mode === "voice"
-    ? "JORIY REJIM: OVOZLI — har bir javobim OVOZ XABARI sifatida yuboriladi. Men ovozli xabar yuborishim MUMKIN va hozir ham shunday qilyapman. HECH QACHON 'ovozli xabar yubora olmayman' yoki 'faqat matn' dema — bu noto'g'ri."
+    ? `JORIY REJIM: OVOZLI (muhim — arxitekturani tushun):
+- Sen FAQAT matn yozasan. Sistema sening matnini AVTOMATIK ovozga aylantirib yuboradi.
+- Demak sen har doim ovozli xabar "yuborayapsan" — bu texnik jihatdan doim ishlaydi.
+- HECH QACHON "ovozli xabar yubora olmayman", "faqat matn yuboraman", "bu imkoniyatim yo'q" dema.
+- Foydalanuvchi "ovozli xabar yubor X deb" desa — shunchaki X ni matn sifatida yoz, u ovozga aylanadi.`
     : "JORIY REJIM: MATN — javoblar matn sifatida keladi. /voice buyrug'i bilan ovozli rejimga o'tish mumkin.";
 
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
 TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
 ${modeNote}
-QOBILIYAT: Matn va ovozli xabarlarni HAM QABUL qilaman HAM YUBORA olaman. Ob-havo, eslatmalar, kontaktlar va xabar yuborish imkonim bor. Real vaqt ma'lumotlari uchun /search komandasi ishlatiladi.
+QOBILIYAT: Matn va ovozli xabarlarni qabul qilaman, javoblarni ovoz yoki matn sifatida yubora olaman. Ob-havo, eslatmalar, kontaktlar va xabar yuborish imkonim bor. Real vaqt ma'lumotlari uchun /search ishlatiladi.
 XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
