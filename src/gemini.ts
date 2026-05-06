@@ -100,13 +100,13 @@ export function buildSystemPrompt(memory: UserMemory, mode: "text" | "voice" = "
   });
 
   const modeNote = mode === "voice"
-    ? "JORIY REJIM: OVOZLI — javoblarim ovoz xabari sifatida yuboriladi. Hech qachon 'ovozli rejimni yoqing' dema, u allaqachon yoqilgan."
-    : "JORIY REJIM: MATN — /voice buyrug'i bilan ovozli rejimga o'tish mumkin.";
+    ? "JORIY REJIM: OVOZLI — har bir javobim OVOZ XABARI sifatida yuboriladi. Men ovozli xabar yuborishim MUMKIN va hozir ham shunday qilyapman. HECH QACHON 'ovozli xabar yubora olmayman' yoki 'faqat matn' dema — bu noto'g'ri."
+    : "JORIY REJIM: MATN — javoblar matn sifatida keladi. /voice buyrug'i bilan ovozli rejimga o'tish mumkin.";
 
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
 TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
 ${modeNote}
-QOBILIYAT: Matn va ovozli xabarlarni qabul qilaman. Ob-havo, eslatmalar, kontaktlar va xabar yuborish imkonim bor. Real vaqt ma'lumotlari uchun /search komandasi ishlatiladi.
+QOBILIYAT: Matn va ovozli xabarlarni HAM QABUL qilaman HAM YUBORA olaman. Ob-havo, eslatmalar, kontaktlar va xabar yuborish imkonim bor. Real vaqt ma'lumotlari uchun /search komandasi ishlatiladi.
 XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
