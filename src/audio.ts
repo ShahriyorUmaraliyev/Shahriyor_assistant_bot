@@ -101,52 +101,73 @@ export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
 }
 
 // ─── 3. Audio Output: Matn → Gemini TTS → WAV ────────────────────────────────
-// lamejs (MP3) ishlatilmaydi — Node.js da MPEGMode not defined xatosi beradi.
-// WAV = 44-byte header + raw PCM16 — hech qanday kutubxona shart emas.
-// Telegram sendVoice WAV formatini qabul qiladi.
+// SDK (@google/generative-ai) responseModalities/speechConfig ni ishonchsiz o'tkazadi.
+// Shuning uchun to'g'ridan REST API ishlatamiz — parametrlar aniq JSON da ketadi.
+// WAV = 44-byte RIFF header + raw PCM16 — hech qanday kutubxona shart emas.
+
+const TTS_MODEL = "gemini-2.5-flash-preview-tts";
 
 export async function textToSpeech(text: string): Promise<Buffer> {
-  const model = getGenAI().getGenerativeModel({ model: "gemini-2.5-flash-preview-tts" });
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY yo'q");
 
-  // responseModalities SDK typingda yo'q — any orqali yuboramiz
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/` +
+    `${TTS_MODEL}:generateContent?key=${apiKey}`;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const generateFn = model.generateContent.bind(model) as (req: any) => Promise<any>;
-  const result = await withRetry(() =>
-    withTimeout(
-      generateFn({
-        contents: [{ role: "user", parts: [{ text }] }],
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
-          },
-        },
-      }),
-      GEMINI_TIMEOUT_MS
-    )
-  );
+  let json: any;
+  try {
+    const res = await withRetry(() =>
+      withTimeout(
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text }] }],
+            generationConfig: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
+              },
+            },
+          }),
+        }),
+        GEMINI_TIMEOUT_MS
+      )
+    );
 
-  const candidates = result?.response?.candidates;
-  const candidate = candidates?.[0];
-  const part = candidate?.content?.parts?.[0];
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      console.error(`[TTS] HTTP ${res.status}:`, errBody.slice(0, 300));
+      if (res.status === 429) throw new Error("429 TTS rate limit");
+      throw new Error(`TTS_HTTP_${res.status}`);
+    }
+
+    json = await res.json();
+  } catch (err) {
+    if ((err as Error).message?.includes("GEMINI_TIMEOUT")) throw new Error("GEMINI_TIMEOUT");
+    throw err;
+  }
+
+  const candidate = json?.candidates?.[0];
+  const part      = candidate?.content?.parts?.[0];
   const data: string | undefined = part?.inlineData?.data;
 
   if (!data) {
-    console.error("[TTS] Audio data yo'q! Sabab:", JSON.stringify({
-      candidatesCount: candidates?.length ?? 0,
-      finishReason: candidate?.finishReason ?? "candidates bo'sh",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      promptFeedback: (result?.response as any)?.promptFeedback ?? null,
-      mimeType: part?.inlineData?.mimeType ?? null,
-      hasText: !!part?.text,
-      textPreview: part?.text?.slice(0, 200) ?? null,
+    console.error("[TTS] Audio data yo'q:", JSON.stringify({
+      candidatesCount : json?.candidates?.length ?? 0,
+      finishReason    : candidate?.finishReason ?? "yo'q",
+      promptFeedback  : json?.promptFeedback ?? null,
+      hasText         : !!part?.text,
+      textPreview     : part?.text?.slice(0, 150) ?? null,
+      mimeType        : part?.inlineData?.mimeType ?? null,
     }));
     throw new Error("TTS_NO_AUDIO");
   }
 
-  // MIME type "audio/L16;codec=pcm;rate=24000" dan sample rate ni ajratib olamiz
-  const mimeType: string = part?.inlineData?.mimeType ?? "audio/pcm";
-  const rateMatch = mimeType.match(/rate=(\d+)/i);
+  const mimeType   = (part?.inlineData?.mimeType as string) ?? "audio/pcm";
+  const rateMatch  = mimeType.match(/rate=(\d+)/i);
   const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24_000;
 
   return pcm16ToWav(Buffer.from(data, "base64"), sampleRate);
