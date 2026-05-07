@@ -5,6 +5,7 @@ import { scheduleReminder } from "./reminder";
 import { sendUserMessage, sendUserVoiceMessage } from "./userclient";
 import { getCalendarEvents, addCalendarEvent } from "./gcalendar";
 import { readSheet, appendSheetRow, updateSheetCell } from "./gsheets";
+import { getCurrentWeather, getForecastWeather } from "./weather";
 
 // Gemini API client — lazy singleton (audio.ts ham shu instansni ishlatadi)
 let _genAI: GoogleGenerativeAI | null = null;
@@ -127,7 +128,7 @@ MISOL: foydalanuvchi "salom deb ovozli xabar yubor" desa → sen shunchaki "Salo
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
 TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
 ${modeNote}
-QOBILIYAT: Matn/ovoz qabul + yuborish. Eslatmalar, kontaktlar, xabar yuborish, Google Calendar (taqvim), Google Sheets (jadval). Ob-havo, yangiliklar va real vaqt ma'lumotlari uchun Google Search avtomatik ishlatiladi.
+QOBILIYAT: Matn/ovoz qabul + yuborish. Ob-havo, eslatmalar, kontaktlar, xabar yuborish, Google Calendar (taqvim), Google Sheets (jadval). Real vaqt yangiliklari uchun /search.
 XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
@@ -212,6 +213,28 @@ export const sendMessageTool = {
       },
     },
     required: ["contact", "message"],
+  },
+};
+
+export const getWeatherTool = {
+  name: "get_weather",
+  description:
+    "Shahar ob-havosini olish — bugungi yoki kelgusi kunlar uchun. " +
+    "Ob-havo, harorat, yog'ingarchilik, shamol so'rovlarida DARHOL chaqiring. " +
+    "\"Ertangi\", \"keyingi 3 kun\", \"5 kunlik\" deyilsa days parametrini bering.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      city: {
+        type: SchemaType.STRING,
+        description: 'Shahar nomi inglizcha. Misol: "Tashkent", "Moscow", "Dubai"',
+      },
+      days: {
+        type: SchemaType.NUMBER,
+        description: "Necha kun bashorat. 0=bugun, 1=ertangi, 2-5=kelgusi kunlar. Standart: 0.",
+      },
+    },
+    required: ["city"],
   },
 };
 
@@ -387,6 +410,11 @@ export async function handleTool(
     }
     await sendUserMessage(userId, recipient, message);
     return `Xabar yuborildi.`;
+  }
+  if (name === "get_weather") {
+    const { city, days } = args as { city: string; days?: number };
+    if (days && days > 0) return await getForecastWeather(city, days);
+    return await getCurrentWeather(city);
   }
   if (name === "get_calendar") {
     const days = typeof args.days === "number" ? args.days : 7;
@@ -588,9 +616,8 @@ export async function generateReply(
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(memory, mode),
     tools: [
-      { googleSearch: {} },
       { functionDeclarations: [
-        updateMemoryTool, setReminderTool,
+        updateMemoryTool, setReminderTool, getWeatherTool,
         sendMessageTool, sendVoiceMessageTool,
         getCalendarTool, addCalendarEventTool,
         readSheetTool, appendSheetTool, updateSheetTool,
