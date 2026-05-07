@@ -2,10 +2,10 @@ import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import type { UserMemory, ChatMessage } from "./types";
 import { patchMemory, getMemory } from "./memory";
 import { scheduleReminder } from "./reminder";
-import { getCurrentWeather } from "./weather";
 import { sendUserMessage, sendUserVoiceMessage } from "./userclient";
 import { getCalendarEvents, addCalendarEvent } from "./gcalendar";
 import { readSheet, appendSheetRow, updateSheetCell } from "./gsheets";
+import { getCurrentWeather, getForecastWeather } from "./weather";
 
 // Gemini API client — lazy singleton (audio.ts ham shu instansni ishlatadi)
 let _genAI: GoogleGenerativeAI | null = null;
@@ -197,14 +197,19 @@ export const setReminderTool = {
 export const getWeatherTool = {
   name: "get_weather",
   description:
-    "Shahar ob-havosini real vaqtda olish. Foydalanuvchi ob-havo, harorat, " +
-    "yog'ingarchlik, shamol haqida so'raganda chaqiring.",
+    "Shahar ob-havosini olish — bugungi yoki kelgusi kunlar uchun. " +
+    "Ob-havo, harorat, yog'ingarchilik, shamol so'rovlarida DARHOL chaqiring. " +
+    "\"Ertangi\", \"keyingi 3 kun\", \"5 kunlik\" deyilsa days parametrini bering.",
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
       city: {
         type: SchemaType.STRING,
         description: 'Shahar nomi inglizcha. Misol: "Tashkent", "Moscow", "Dubai"',
+      },
+      days: {
+        type: SchemaType.NUMBER,
+        description: "Necha kun bashorat. 0=hozirgi, 1=ertangi, 2-5=kelgusi kunlar. Standart: 0.",
       },
     },
     required: ["city"],
@@ -388,7 +393,9 @@ export async function handleTool(
     return `Eslatma rejalashtirildi (id: ${id}).`;
   }
   if (name === "get_weather") {
-    const { city } = args as { city: string };
+    const { city, days } = args as { city: string; days?: number };
+    if (days && days > 0)
+      return await getForecastWeather(city, days);
     return await getCurrentWeather(city);
   }
   if (name === "send_message") {
