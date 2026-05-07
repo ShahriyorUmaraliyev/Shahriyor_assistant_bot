@@ -7,9 +7,7 @@ const TIMEOUT_MS = 10_000;
 function getAuth() {
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON sozlanmagan");
-  const creds = JSON.parse(
-    Buffer.from(raw, "base64").toString("utf8")
-  );
+  const creds = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
   return new google.auth.GoogleAuth({ credentials: creds, scopes: SCOPES });
 }
 
@@ -17,17 +15,38 @@ function getCalendarId(): string {
   return process.env.GOOGLE_CALENDAR_ID ?? "primary";
 }
 
-// ─── Format event for display ────────────────────────────────────────────────
+function isAuthError(msg: string): boolean {
+  const l = msg.toLowerCase();
+  return (
+    l.includes("invalid_grant") ||
+    l.includes("unauthorized") ||
+    l.includes("unauthenticated") ||
+    l.includes("forbidden") ||
+    l.includes("403") ||
+    l.includes("401")
+  );
+}
+
+function withTimer<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, r) => {
+    timer = setTimeout(() => r(new Error("TIMEOUT")), TIMEOUT_MS);
+  });
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    timeout,
+  ]);
+}
+
+// ─── Format event ────────────────────────────────────────────────────────────
 
 function formatEvent(ev: calendar_v3.Schema$Event): string {
   const title = ev.summary ?? "(sarlavsiz)";
-  const start = ev.start?.dateTime ?? ev.start?.date ?? "";
-  const end = ev.end?.dateTime ?? ev.end?.date ?? "";
 
   let time = "";
   if (ev.start?.dateTime) {
     const s = new Date(ev.start.dateTime);
-    const e = new Date(ev.end?.dateTime ?? ev.end?.date ?? start);
+    const e = new Date(ev.end?.dateTime ?? ev.start.dateTime);
     time = `${fmt(s)} – ${fmtTime(e)}`;
   } else if (ev.start?.date) {
     time = `${ev.start.date} (kun bo'yi)`;
@@ -68,7 +87,7 @@ export async function getCalendarEvents(days = 7): Promise<string> {
     const now = new Date();
     const maxTime = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
 
-    const res = await Promise.race([
+    const res = await withTimer(
       calendar.events.list({
         calendarId: getCalendarId(),
         timeMin: now.toISOString(),
@@ -76,9 +95,8 @@ export async function getCalendarEvents(days = 7): Promise<string> {
         maxResults: 20,
         singleEvents: true,
         orderBy: "startTime",
-      }),
-      new Promise<never>((_, r) => setTimeout(() => r(new Error("TIMEOUT")), TIMEOUT_MS)),
-    ]);
+      })
+    );
 
     const events = res.data.items ?? [];
     if (!events.length)
@@ -89,7 +107,7 @@ export async function getCalendarEvents(days = 7): Promise<string> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("TIMEOUT")) return "Google Calendar so'rovi vaqt tugadi.";
-    if (msg.includes("invalid_grant") || msg.includes("unauthorized"))
+    if (isAuthError(msg))
       return "Google Calendar ruxsati yo'q. Service account kalendarni ulashganligini tekshiring.";
     return `Calendar xatosi: ${msg}`;
   }
@@ -119,22 +137,15 @@ export async function addCalendarEvent(
     if (description) event.description = description;
     if (location) event.location = location;
 
-    const res = await Promise.race([
-      calendar.events.insert({
-        calendarId: getCalendarId(),
-        requestBody: event,
-      }),
-      new Promise<never>((_, r) => setTimeout(() => r(new Error("TIMEOUT")), TIMEOUT_MS)),
-    ]);
+    const res = await withTimer(
+      calendar.events.insert({ calendarId: getCalendarId(), requestBody: event })
+    );
 
-    const created = res.data;
-    const start = new Date(startIso);
-    return `✅ Tadbir qo'shildi: "${created.summary}" — ${fmt(start)}`;
+    return `✅ Tadbir qo'shildi: "${res.data.summary}" — ${fmt(new Date(startIso))}`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("TIMEOUT")) return "Google Calendar so'rovi vaqt tugadi.";
-    if (msg.includes("invalid_grant") || msg.includes("unauthorized"))
-      return "Google Calendar ruxsati yo'q.";
+    if (isAuthError(msg)) return "Google Calendar ruxsati yo'q.";
     return `Tadbir qo'shishda xato: ${msg}`;
   }
 }

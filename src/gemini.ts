@@ -335,7 +335,7 @@ export const appendSheetTool = {
       },
       values: {
         type: SchemaType.STRING,
-        description: "Qator qiymatlari vergul bilan ajratilgan. Misol: \"2026-05-07,Sardor,Chanel No5,450000,yetkazildi\"",
+        description: "Qator qiymatlari | bilan ajratilgan. Misol: \"2026-05-07|Sardor|Chanel No5|450000|yetkazildi\"",
       },
     },
     required: ["sheet", "values"],
@@ -425,7 +425,7 @@ export async function handleTool(
   }
   if (name === "append_sheet") {
     const { sheet, values } = args as { sheet: string; values: string };
-    const cells = values.split(",").map((v) => v.trim());
+    const cells = values.split("|").map((v) => v.trim());
     return await appendSheetRow(sheet, cells);
   }
   if (name === "update_sheet_cell") {
