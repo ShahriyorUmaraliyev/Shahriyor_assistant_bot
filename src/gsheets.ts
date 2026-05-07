@@ -3,11 +3,14 @@ import { google } from "googleapis";
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 const TIMEOUT_MS = 10_000;
 
+let _auth: InstanceType<typeof google.auth.GoogleAuth> | null = null;
 function getAuth() {
+  if (_auth) return _auth;
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON sozlanmagan");
   const creds = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
-  return new google.auth.GoogleAuth({ credentials: creds, scopes: SCOPES });
+  _auth = new google.auth.GoogleAuth({ credentials: creds, scopes: SCOPES });
+  return _auth;
 }
 
 function getSheetId(): string {

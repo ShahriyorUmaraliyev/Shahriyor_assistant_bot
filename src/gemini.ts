@@ -372,13 +372,17 @@ export async function handleTool(
 ): Promise<string> {
   if (name === "update_memory") {
     const patch: any = { ...args };
+    const failures: string[] = [];
     if (typeof patch.contacts === "string") {
-      try { patch.contacts = JSON.parse(patch.contacts); } catch (e) { delete patch.contacts; }
+      try { patch.contacts = JSON.parse(patch.contacts); }
+      catch { delete patch.contacts; failures.push("contacts"); console.warn("[update_memory] contacts JSON parse xato:", patch.contacts); }
     }
     if (typeof patch.products === "string") {
-      try { patch.products = JSON.parse(patch.products); } catch (e) { delete patch.products; }
+      try { patch.products = JSON.parse(patch.products); }
+      catch { delete patch.products; failures.push("products"); console.warn("[update_memory] products JSON parse xato:", patch.products); }
     }
     await patchMemory(userId, patch);
+    if (failures.length) return `Xotira qisman yangilandi. Saqlanmadi: ${failures.join(", ")} (format xato).`;
     if (patch.preference) return `Ko'rsatma saqlandi: "${patch.preference}"`;
     return "Xotira yangilandi.";
   }

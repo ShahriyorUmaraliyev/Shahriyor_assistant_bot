@@ -4,11 +4,14 @@ import type { calendar_v3 } from "googleapis";
 const SCOPES = ["https://www.googleapis.com/auth/calendar"];
 const TIMEOUT_MS = 10_000;
 
+let _auth: InstanceType<typeof google.auth.GoogleAuth> | null = null;
 function getAuth() {
+  if (_auth) return _auth;
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON sozlanmagan");
   const creds = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
-  return new google.auth.GoogleAuth({ credentials: creds, scopes: SCOPES });
+  _auth = new google.auth.GoogleAuth({ credentials: creds, scopes: SCOPES });
+  return _auth;
 }
 
 function getCalendarId(): string {
@@ -125,6 +128,13 @@ export async function addCalendarEvent(
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     return "Google Calendar sozlanmagan (GOOGLE_SERVICE_ACCOUNT_JSON yo'q).";
 
+  const startDate = new Date(startIso);
+  const endDate = new Date(endIso);
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()))
+    return `Noto'g'ri vaqt formati. ISO 8601 kerak (masalan: 2026-05-10T14:00:00+05:00).`;
+  if (endDate.getTime() <= startDate.getTime())
+    return "Tugash vaqti boshlanish vaqtidan keyin bo'lishi kerak.";
+
   try {
     const auth = getAuth();
     const calendar = google.calendar({ version: "v3", auth });
@@ -141,7 +151,7 @@ export async function addCalendarEvent(
       calendar.events.insert({ calendarId: getCalendarId(), requestBody: event })
     );
 
-    return `✅ Tadbir qo'shildi: "${res.data.summary}" — ${fmt(new Date(startIso))}`;
+    return `✅ Tadbir qo'shildi: "${res.data.summary}" — ${fmt(startDate)}`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("TIMEOUT")) return "Google Calendar so'rovi vaqt tugadi.";
