@@ -3,7 +3,9 @@ import type { UserMemory, ChatMessage } from "./types";
 import { patchMemory, getMemory } from "./memory";
 import { scheduleReminder } from "./reminder";
 import { getCurrentWeather } from "./weather";
-import { sendUserMessage } from "./userclient";
+import { sendUserMessage, sendUserVoiceMessage } from "./userclient";
+import { getCalendarEvents, addCalendarEvent } from "./gcalendar";
+import { readSheet, appendSheetRow, updateSheetCell } from "./gsheets";
 
 // Gemini API client — lazy singleton (audio.ts ham shu instansni ishlatadi)
 let _genAI: GoogleGenerativeAI | null = null;
@@ -57,36 +59,53 @@ export function classifyGeminiError(err: unknown): "billing" | "rate_limit" | "t
   return "unknown";
 }
 
+function isRetryable(err: unknown): boolean {
+  if (isBillingError(err)) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes("429") ||
+    msg.includes("503") ||
+    msg.includes("500") ||
+    msg.toLowerCase().includes("too many requests") ||
+    msg.toLowerCase().includes("service unavailable") ||
+    msg.toLowerCase().includes("socket") ||
+    msg.toLowerCase().includes("network")
+  );
+}
+
 export async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
+  let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      // Billing xatolarini qayta urinmaslik — ular hech qachon o'z-o'zidan hal bo'lmaydi
-      if (is429(err) && !isBillingError(err) && attempt < retries) {
+      lastErr = err;
+      if (isRetryable(err) && attempt < retries) {
         await new Promise((r) => setTimeout(r, (attempt + 1) * 2000));
         continue;
       }
       throw err;
     }
   }
-  throw new Error("Unreachable");
+  throw lastErr;
 }
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
 
 function compactMemory(memory: UserMemory): string {
   const parts: string[] = [];
-  // Max 30 kontakt, 30 mahsulot, 10 oxirgi yozuv — system prompt portlamasligi uchun
-  const contacts = Object.entries(memory.contacts ?? {}).slice(-30);
-  const products = Object.entries(memory.products ?? {}).slice(-30);
-  const notes    = (memory.notes ?? []).slice(-10);
+  const contacts    = Object.entries(memory.contacts ?? {}).slice(-30);
+  const products    = Object.entries(memory.products ?? {}).slice(-30);
+  const notes       = (memory.notes ?? []).slice(-10);
+  const preferences = (memory.preferences ?? []).slice(-20);
   if (contacts.length > 0)
     parts.push(`contacts:${JSON.stringify(Object.fromEntries(contacts))}`);
   if (products.length > 0)
     parts.push(`products:${JSON.stringify(Object.fromEntries(products))}`);
   if (notes.length > 0)
     parts.push(`notes:${JSON.stringify(notes)}`);
+  if (preferences.length > 0)
+    parts.push(`preferences:${JSON.stringify(preferences)}`);
   return parts.length > 0 ? parts.join("\n") : "(bo'sh)";
 }
 
@@ -109,14 +128,19 @@ MISOL: foydalanuvchi "salom deb ovozli xabar yubor" desa → sen shunchaki "Salo
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
 TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
 ${modeNote}
-QOBILIYAT: Matn va ovozli xabarlarni qabul qilaman, javoblarni ovoz yoki matn sifatida yubora olaman. Ob-havo, eslatmalar, kontaktlar va xabar yuborish imkonim bor. Real vaqt ma'lumotlari uchun /search ishlatiladi.
+QOBILIYAT: Matn/ovoz qabul + yuborish. Ob-havo, eslatmalar, kontaktlar, xabar yuborish, Google Calendar (taqvim), Google Sheets (jadval). Real vaqt ma'lumotlari uchun /search.
 XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
 - vaqtli eslatma → set_reminder (ISO 8601 +05:00) | "ertaga"=ertangi kun | soat yo'q: ertalab=09:00, tush=14:00, kech=18:00 | "soat 1-11" = kechqurun (13:00-23:00), ya'ni "soat 3"=15:00, "soat 9"=21:00
-- kontaktga MATNLI xabar yuborish → send_message (xotirada telefon bo'lishi shart; /auth_tg ulanmagan bo'lsa ayta)
-- kontaktga OVOZLI xabar yuborish → send_voice_message (xuddi send_message kabi, lekin audio sifatida yetkaziladi)
-- MUHIM: eslatmalar (set_reminder) FAQAT Shahriyorning o'ziga keladi. Boshqalarga xabar yuborish uchun send_message yoki send_voice_message ishlatiladi.`;
+- kontaktga MATNLI xabar yuborish → send_message tool ni DARHOL chaqir, hech qanday tekshiruvsiz
+- kontaktga OVOZLI xabar yuborish → send_voice_message tool ni DARHOL chaqir, hech qanday tekshiruvsiz
+- MUHIM: "ulanganmi", "imkon bor" kabi savollarni hech qachon berma — tool ni chaqir, natijani ko'r
+- MUHIM: eslatmalar (set_reminder) FAQAT Shahriyorning o'ziga keladi. Boshqalarga xabar yuborish uchun send_message yoki send_voice_message ishlatiladi.
+- taqvim ko'rish/qo'shish → get_calendar / add_calendar_event | end yo'q bo'lsa: start + 1 soat
+- jadval o'qish → read_sheet | jadvalga yozish → append_sheet | katak yangilash → update_sheet_cell
+- foydalanuvchi xulq-atvor/format ko'rsatmasi bersа ("bunday qil", "shunday yoz") → update_memory preference sifatida saqlа, DARHOL o'sha uslubda davom et
+- XOTIRA da preferences bo'lsa — ularni HAR DOIM qat'iy bajar`;
 }
 
 // ─── Tool Declarations ────────────────────────────────────────────────────────
@@ -124,8 +148,8 @@ QOIDALAR:
 export const updateMemoryTool = {
   name: "update_memory",
   description:
-    "Kontakt, mahsulot narxi yoki muhim ma'lumotni doimiy xotiraga yozish. " +
-    "Foydalanuvchi ism, telefon, narx, tavsif yoki buyurtma aytganda chaqiring.",
+    "Kontakt, mahsulot narxi, muhim ma'lumot yoki foydalanuvchi xulq-atvor ko'rsatmasini doimiy xotiraga yozish. " +
+    "Foydalanuvchi ism, telefon, narx, tavsif, buyurtma YOKI format/uslub ko'rsatmasi aytganda chaqiring.",
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
@@ -140,6 +164,10 @@ export const updateMemoryTool = {
       note: {
         type: SchemaType.STRING,
         description: 'Muhim yozuv. Misol: "Akbar 5 dona buyurtma, payshanba yetkazish"',
+      },
+      preference: {
+        type: SchemaType.STRING,
+        description: 'Foydalanuvchi xulq-atvor/format ko\'rsatmasi. Misol: "qidiruv natijalarini har birida inline link bilan ko\'rsat", "javoblarni qisqa yoz", "doim o\'zbek tilida javob ber"',
       },
     },
   },
@@ -187,7 +215,7 @@ export const sendMessageTool = {
   name: "send_message",
   description:
     "Foydalanuvchi (Shahriyor) nomidan kontaktga Telegram MATNLI xabar yuborish. " +
-    "Hisobi /auth_tg orqali ulanган bo'lishi kerak. Kontakt telefon xotirada saqlangan bo'lishi kerak.",
+    "Kontakt ismi yoki telefon raqami kerak. Foydalanuvchi xabar yuborishni so'raganda DARHOL chaqir.",
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
@@ -208,8 +236,8 @@ export const sendVoiceMessageTool = {
   name: "send_voice_message",
   description:
     "Foydalanuvchi (Shahriyor) nomidan kontaktga Telegram OVOZLI xabar yuborish. " +
-    "'X ga ovozli xabar yubor', 'ovozli ayt', 'audio xabar jo'nat' so'rovlarida ishlatiladi. " +
-    "Xotirada telefon bo'lishi va /auth_tg orqali hisob ulanган bo'lishi kerak.",
+    "'X ga ovozli xabar yubor', 'ovozli ayt', 'audio xabar jo'nat' so'rovlarida DARHOL chaqir. " +
+    "Kontakt ismi yoki telefon raqami kerak.",
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
@@ -223,6 +251,115 @@ export const sendVoiceMessageTool = {
       },
     },
     required: ["contact", "message"],
+  },
+};
+
+export const getCalendarTool = {
+  name: "get_calendar",
+  description:
+    "Google Calendar dan kelgusi tadbirlarni ko'rish. " +
+    "\"Bugun nima bor?\", \"Bu hafta nima rejalashtirilgan?\", \"Taqvimim\", \"Uchrashuvlar\" so'rovlarida chaqiring.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      days: {
+        type: SchemaType.NUMBER,
+        description: "Necha kunni ko'rish. Standart: 7. Bugun=1, bu hafta=7, bu oy=30.",
+      },
+    },
+  },
+};
+
+export const addCalendarEventTool = {
+  name: "add_calendar_event",
+  description:
+    "Google Calendar ga yangi tadbir qo'shish. " +
+    "\"Uchrashuv qo'y\", \"Eslatma qo'sh\", \"Kalendarimga qo'sh\" so'rovlarida chaqiring.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      title: {
+        type: SchemaType.STRING,
+        description: "Tadbir nomi. Misol: \"Sardorbek bilan uchrashuv\"",
+      },
+      start: {
+        type: SchemaType.STRING,
+        description: "Boshlanish vaqti ISO 8601 (+05:00). Misol: \"2026-05-10T14:00:00+05:00\"",
+      },
+      end: {
+        type: SchemaType.STRING,
+        description: "Tugash vaqti ISO 8601 (+05:00). Misol: \"2026-05-10T15:00:00+05:00\"",
+      },
+      description: {
+        type: SchemaType.STRING,
+        description: "Qo'shimcha tavsif (ixtiyoriy).",
+      },
+      location: {
+        type: SchemaType.STRING,
+        description: "Manzil (ixtiyoriy). Misol: \"Toshkent, Chilonzor\"",
+      },
+    },
+    required: ["title", "start", "end"],
+  },
+};
+
+export const readSheetTool = {
+  name: "read_sheet",
+  description:
+    "Google Sheets dan ma'lumot o'qish. " +
+    "\"Jadvaldan ko'rsat\", \"Buyurtmalar ro'yxati\", \"Mahsulotlar narxi\" so'rovlarida chaqiring. " +
+    "Sheet nomi va diapazon ko'rsating.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      range: {
+        type: SchemaType.STRING,
+        description: "Diapazon. Misol: \"Buyurtmalar!A1:F20\", \"Sheet1\", \"Mahsulotlar!A:D\"",
+      },
+    },
+    required: ["range"],
+  },
+};
+
+export const appendSheetTool = {
+  name: "append_sheet",
+  description:
+    "Google Sheets ga yangi qator qo'shish. " +
+    "\"Buyurtma yoz\", \"Jadvalga qo'sh\", \"Yozib ol\" so'rovlarida chaqiring.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      sheet: {
+        type: SchemaType.STRING,
+        description: "Sheet (varaq) nomi. Misol: \"Buyurtmalar\", \"Sheet1\"",
+      },
+      values: {
+        type: SchemaType.STRING,
+        description: "Qator qiymatlari vergul bilan ajratilgan. Misol: \"2026-05-07,Sardor,Chanel No5,450000,yetkazildi\"",
+      },
+    },
+    required: ["sheet", "values"],
+  },
+};
+
+export const updateSheetTool = {
+  name: "update_sheet_cell",
+  description:
+    "Google Sheets dagi bitta katakni yangilash. " +
+    "\"5-qatordagi narxni o'zgartir\", \"B5 ni yangilab\" so'rovlarida chaqiring.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      range: {
+        type: SchemaType.STRING,
+        description: "Katak manzili. Misol: \"Sheet1!B5\", \"Buyurtmalar!D12\"",
+      },
+      value: {
+        type: SchemaType.STRING,
+        description: "Yangi qiymat.",
+      },
+    },
+    required: ["range", "value"],
   },
 };
 
@@ -242,6 +379,7 @@ export async function handleTool(
       try { patch.products = JSON.parse(patch.products); } catch (e) { delete patch.products; }
     }
     await patchMemory(userId, patch);
+    if (patch.preference) return `Ko'rsatma saqlandi: "${patch.preference}"`;
     return "Xotira yangilandi.";
   }
   if (name === "set_reminder") {
@@ -271,6 +409,29 @@ export async function handleTool(
     await sendUserMessage(userId, recipient, message);
     return `Xabar yuborildi.`;
   }
+  if (name === "get_calendar") {
+    const days = typeof args.days === "number" ? args.days : 7;
+    return await getCalendarEvents(Math.min(Math.max(days, 1), 90));
+  }
+  if (name === "add_calendar_event") {
+    const { title, start, end, description, location } = args as {
+      title: string; start: string; end: string; description?: string; location?: string;
+    };
+    return await addCalendarEvent(title, start, end, description, location);
+  }
+  if (name === "read_sheet") {
+    const { range } = args as { range: string };
+    return await readSheet(range);
+  }
+  if (name === "append_sheet") {
+    const { sheet, values } = args as { sheet: string; values: string };
+    const cells = values.split(",").map((v) => v.trim());
+    return await appendSheetRow(sheet, cells);
+  }
+  if (name === "update_sheet_cell") {
+    const { range, value } = args as { range: string; value: string };
+    return await updateSheetCell(range, value);
+  }
   if (name === "send_voice_message") {
     const { contact, message } = args as { contact: string; message: string };
     let recipient = contact;
@@ -286,9 +447,8 @@ export async function handleTool(
       if (recipient === contact)
         return `"${contact}" kontaktining telefon raqami xotirada topilmadi. Avval kontakt raqamini saqlang.`;
     }
-    // Dynamic import — audio.ts gemini.ts dan import qiladi, sirkular importni oldini olish
+    // textToSpeech dynamic import — audio.ts gemini.ts dan import qiladi (sirkular)
     const { textToSpeech } = await import("./audio");
-    const { sendUserVoiceMessage } = await import("./userclient");
     const safeMsg = message.slice(0, 800);
     const audioBuffer = await textToSpeech(safeMsg);
     await sendUserVoiceMessage(userId, recipient, audioBuffer);
@@ -307,6 +467,17 @@ function trimHistory(history: ChatMessage[]): { role: string; parts: { text: str
   }));
 }
 
+function buildSearchSystemPrompt(memory: UserMemory): string {
+  const base = buildSystemPrompt(memory, "text");
+  return `${base}
+QIDIRUV FORMATI — QAT'IY QOIDALAR:
+1. Har bir yangilik/element ALOHIDA paragraf bo'lsin (ular orasida bo'sh qator).
+2. Format: "Sarlavha: tavsif 1-2 jumla." — boshqa narsa yo'q.
+3. Seksiya sarlavhalari, bold (**), list belgisi (*/-) ISHLATMA — oddiy matn yoz.
+4. MAX 5 ta element.
+5. Linklar sistema tomonidan AVTOMATIK qo'shiladi — sen hech qachon link yozma.`
+}
+
 export async function generateWithSearch(
   userText: string,
   history: ChatMessage[],
@@ -316,20 +487,18 @@ export async function generateWithSearch(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const model = getGenAI().getGenerativeModel({
     model: "gemini-2.5-flash",
-    systemInstruction: buildSystemPrompt(memory, mode),
+    systemInstruction: buildSearchSystemPrompt(memory),
     tools: [{ googleSearch: {} }] as any,
     // Grounding results are already factual — thinking tokens not needed
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
   });
 
-  // generateContent (startChat emas) — Google grounding uchun tavsiya etilgan usul.
-  // Oxirgi 2 history xabari: search o'zi yangi ma'lumot beradi, ko'p context keraksiz.
-  const recentHistory = trimHistory(history).slice(-2);
+  // generateContent — history yuborilmaydi: Google Search o'zi yangi ma'lumot beradi,
+  // history = ortiqcha tokenlar sarfi.
   const result = await withRetry(() =>
     withTimeout(
       model.generateContent({
         contents: [
-          ...recentHistory,
           { role: "user", parts: [{ text: userText }] },
         ],
       } as any),
@@ -342,24 +511,88 @@ export async function generateWithSearch(
   const text = result.response.text()?.trim();
   if (!text) return "🔍 Qidiruv natijasi topilmadi. Boshqacha so'rab ko'ring.";
 
-  // Grounding metadata dan manba havolalarini olish
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const meta = (result.response as any).candidates?.[0]?.groundingMetadata;
-  const chunks: Array<{ web?: { uri?: string; title?: string } }> =
-    meta?.groundingChunks ?? [];
+  const chunks: Array<{ web?: { uri?: string; title?: string } }> = meta?.groundingChunks ?? [];
+  const supports: Array<{
+    groundingChunkIndices?: number[];
+    segment?: { endIndex?: number };
+  }> = meta?.groundingSupports ?? [];
 
-  const sources = chunks
-    .map((c) => c.web)
-    .filter((w): w is { uri: string; title: string } => !!(w?.uri && w?.title))
-    // duplicate uri lar olib tashlanadi
-    .filter((w, i, arr) => arr.findIndex((x) => x.uri === w.uri) === i)
-    .slice(0, 5) // max 5 ta havola
-    .map((w) => `• [${w.title}](${w.uri})`);
+  if (!chunks.length) return text;
 
-  if (sources.length > 0) {
-    return `${text}\n\n📎 *Manbalar:*\n${sources.join("\n")}`;
+  // Har bir paragrafning oxiriga tegishli manba linkini qo'shish.
+  // groundingSupports: text segment (endIndex) → chunk indeks.
+  // Paragraflarni ajratib, har biriga eng yaqin support ni topamiz.
+
+  const paragraphs = text.split(/\n{2,}/).filter((p) => p.trim());
+
+  // Har bir support uchun: char offset va uri
+  type SegLink = { endIndex: number; uri: string; title: string };
+  const segLinks: SegLink[] = [];
+  for (const s of supports) {
+    const idx = s.groundingChunkIndices?.[0];
+    if (idx === undefined) continue;
+    const web = chunks[idx]?.web;
+    if (!web?.uri || !web?.title) continue;
+    segLinks.push({
+      endIndex: s.segment?.endIndex ?? 0,
+      uri: web.uri,
+      title: web.title,
+    });
   }
-  return text;
+
+  if (!segLinks.length) {
+    // Fallback: barcha manbalar pastda
+    const all = chunks
+      .map((c) => c.web)
+      .filter((w): w is { uri: string; title: string } => !!(w?.uri && w?.title))
+      .filter((w, i, a) => a.findIndex((x) => x.uri === w.uri) === i)
+      .slice(0, 5)
+      .map((w) => {
+        const uri = w.uri.replace(/_/g, "%5F").replace(/\)/g, "%29");
+        return `• [${w.title}](${uri})`;
+      });
+    return all.length ? `${text}\n\n📎 *Manbalar:*\n${all.join("\n")}` : text;
+  }
+
+  // Har bir paragrafning taxminiy char offset ini hisoblash
+  let offset = 0;
+  const paraOffsets: number[] = [];
+  for (const p of paragraphs) {
+    paraOffsets.push(offset);
+    offset += p.length + 2; // +2 = "\n\n"
+  }
+
+  // Har paragraf uchun: o'sha paragraf ichiga tushadigan segLink lar
+  const usedUris = new Set<string>();
+  const result2 = paragraphs.map((para, i) => {
+    const start = paraOffsets[i];
+    const end = start + para.length;
+    // Bu paragraf oralig'iga to'g'ri keladigan linklar
+    const matched = segLinks.filter(
+      (s) => s.endIndex > start && s.endIndex <= end + 50
+    );
+    const unique = matched.filter((s) => !usedUris.has(s.uri));
+    if (!unique.length) return para;
+    // Birinchi moslashgan linkni ishlatamiz
+    usedUris.add(unique[0].uri);
+    const safeUri = unique[0].uri.replace(/_/g, "%5F").replace(/\)/g, "%29");
+    return `${para}\n[Havola ↗](${safeUri})`;
+  });
+
+  // Ishlatilmagan linklar pastda
+  const unused = segLinks
+    .filter((s) => !usedUris.has(s.uri))
+    .filter((s, i, a) => a.findIndex((x) => x.uri === s.uri) === i)
+    .slice(0, 3)
+    .map((s) => {
+      const uri = s.uri.replace(/_/g, "%5F").replace(/\)/g, "%29");
+      return `• [${s.title}](${uri})`;
+    });
+
+  const body = result2.join("\n\n");
+  return unused.length ? `${body}\n\n📎 *Boshqa manbalar:*\n${unused.join("\n")}` : body;
 }
 
 export async function generateReply(
@@ -376,7 +609,12 @@ export async function generateReply(
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(memory, mode),
     tools: [
-      { functionDeclarations: [updateMemoryTool, setReminderTool, getWeatherTool, sendMessageTool, sendVoiceMessageTool] },
+      { functionDeclarations: [
+        updateMemoryTool, setReminderTool, getWeatherTool,
+        sendMessageTool, sendVoiceMessageTool,
+        getCalendarTool, addCalendarEventTool,
+        readSheetTool, appendSheetTool, updateSheetTool,
+      ]},
     ] as any,
     // Tool calls don't benefit from thinking — disable to save tokens
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
@@ -391,6 +629,7 @@ export async function generateReply(
 
   // Tool loop: max 1 marta — shaxsiy assistant uchun 1 tool call yetarli
   const calls = result.response.functionCalls();
+  console.log(`[Gemini:tools] ${calls?.length ? calls.map(c => c.name).join(", ") : "tool chaqirilmadi"}`);
   if (calls?.length) {
     const toolResults = await Promise.all(
       calls.map(async (call) => {
