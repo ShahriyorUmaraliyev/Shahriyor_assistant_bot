@@ -310,6 +310,15 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       lines.push("\n📝 *Yozuvlar:* yo'q");
     }
 
+    // Ko'rsatmalar
+    const prefs = memory.preferences ?? [];
+    if (prefs.length > 0) {
+      lines.push("\n⚙️ *Ko'rsatmalar:*");
+      prefs.forEach((p, i) => lines.push(`${i + 1}. ${p}`));
+    } else {
+      lines.push("\n⚙️ *Ko'rsatmalar:* yo'q");
+    }
+
     let result = lines.join("\n");
     if (result.length > 4000) result = result.slice(0, 4000) + "\n...";
     await sendMessage(chatId, result);
