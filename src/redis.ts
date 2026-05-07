@@ -41,5 +41,5 @@ export async function getUserMode(userId: number): Promise<UserMode> {
 }
 
 export async function setUserMode(userId: number, mode: UserMode): Promise<void> {
-  await getRedis().set(modeKey(userId), mode, { ex: 60 * 60 * 24 * 7 });
+  await getRedis().set(modeKey(userId), mode);
 }

@@ -28,20 +28,14 @@ function logTokenUsage(label: string, response: { usageMetadata?: { promptTokenC
 export const GEMINI_TIMEOUT_MS = 50_000;
 
 export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`GEMINI_TIMEOUT: ${ms}ms dan oshib ketdi`)), ms);
+  });
   return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`GEMINI_TIMEOUT: ${ms}ms dan oshib ketdi`)),
-        ms
-      )
-    ),
+    promise.finally(() => clearTimeout(timer)),
+    timeout,
   ]);
-}
-
-function is429(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return msg.includes("429") || msg.toLowerCase().includes("too many requests");
 }
 
 function isBillingError(err: unknown): boolean {
@@ -401,7 +395,7 @@ export async function handleTool(
       const memory = await getMemory(userId);
       const lower = contact.toLowerCase();
       for (const [cname, data] of Object.entries(memory.contacts)) {
-        if (cname.toLowerCase().includes(lower) || lower.includes(cname.toLowerCase())) {
+        if (cname.toLowerCase() === lower || (lower.length >= 3 && cname.toLowerCase().includes(lower))) {
           if (data.phone) { recipient = data.phone; break; }
         }
       }
@@ -447,7 +441,7 @@ export async function handleTool(
       const memory = await getMemory(userId);
       const lower = contact.toLowerCase();
       for (const [cname, data] of Object.entries(memory.contacts)) {
-        if (cname.toLowerCase().includes(lower) || lower.includes(cname.toLowerCase())) {
+        if (cname.toLowerCase() === lower || (lower.length >= 3 && cname.toLowerCase().includes(lower))) {
           if (data.phone) { recipient = data.phone; break; }
         }
       }
@@ -489,7 +483,7 @@ export async function generateWithSearch(
   userText: string,
   history: ChatMessage[],
   memory: UserMemory,
-  mode: "text" | "voice" = "text"
+  _mode: "text" | "voice" = "text"
 ): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const model = getGenAI().getGenerativeModel({
