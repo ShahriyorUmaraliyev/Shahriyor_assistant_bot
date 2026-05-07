@@ -5,7 +5,6 @@ import { scheduleReminder } from "./reminder";
 import { sendUserMessage, sendUserVoiceMessage } from "./userclient";
 import { getCalendarEvents, addCalendarEvent } from "./gcalendar";
 import { readSheet, appendSheetRow, updateSheetCell } from "./gsheets";
-import { getCurrentWeather, getForecastWeather } from "./weather";
 
 // Gemini API client — lazy singleton (audio.ts ham shu instansni ishlatadi)
 let _genAI: GoogleGenerativeAI | null = null;
@@ -128,7 +127,7 @@ MISOL: foydalanuvchi "salom deb ovozli xabar yubor" desa → sen shunchaki "Salo
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
 TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
 ${modeNote}
-QOBILIYAT: Matn/ovoz qabul + yuborish. Ob-havo, eslatmalar, kontaktlar, xabar yuborish, Google Calendar (taqvim), Google Sheets (jadval). Real vaqt ma'lumotlari uchun /search.
+QOBILIYAT: Matn/ovoz qabul + yuborish. Eslatmalar, kontaktlar, xabar yuborish, Google Calendar (taqvim), Google Sheets (jadval). Ob-havo, yangiliklar va real vaqt ma'lumotlari uchun Google Search avtomatik ishlatiladi.
 XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
@@ -194,27 +193,6 @@ export const setReminderTool = {
   },
 };
 
-export const getWeatherTool = {
-  name: "get_weather",
-  description:
-    "Shahar ob-havosini olish — bugungi yoki kelgusi kunlar uchun. " +
-    "Ob-havo, harorat, yog'ingarchilik, shamol so'rovlarida DARHOL chaqiring. " +
-    "\"Ertangi\", \"keyingi 3 kun\", \"5 kunlik\" deyilsa days parametrini bering.",
-  parameters: {
-    type: SchemaType.OBJECT,
-    properties: {
-      city: {
-        type: SchemaType.STRING,
-        description: 'Shahar nomi inglizcha. Misol: "Tashkent", "Moscow", "Dubai"',
-      },
-      days: {
-        type: SchemaType.NUMBER,
-        description: "Necha kun bashorat. 0=hozirgi, 1=ertangi, 2-5=kelgusi kunlar. Standart: 0.",
-      },
-    },
-    required: ["city"],
-  },
-};
 
 export const sendMessageTool = {
   name: "send_message",
@@ -391,12 +369,6 @@ export async function handleTool(
     const { text, time } = args as { text: string; time: string };
     const id = await scheduleReminder(userId, text, time);
     return `Eslatma rejalashtirildi (id: ${id}).`;
-  }
-  if (name === "get_weather") {
-    const { city, days } = args as { city: string; days?: number };
-    if (days && days > 0)
-      return await getForecastWeather(city, days);
-    return await getCurrentWeather(city);
   }
   if (name === "send_message") {
     const { contact, message } = args as { contact: string; message: string };
@@ -616,8 +588,9 @@ export async function generateReply(
     model: "gemini-2.5-flash",
     systemInstruction: buildSystemPrompt(memory, mode),
     tools: [
+      { googleSearch: {} },
       { functionDeclarations: [
-        updateMemoryTool, setReminderTool, getWeatherTool,
+        updateMemoryTool, setReminderTool,
         sendMessageTool, sendVoiceMessageTool,
         getCalendarTool, addCalendarEventTool,
         readSheetTool, appendSheetTool, updateSheetTool,
