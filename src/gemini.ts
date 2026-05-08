@@ -56,6 +56,8 @@ export function classifyGeminiError(err: unknown): "billing" | "rate_limit" | "t
 function isRetryable(err: unknown): boolean {
   if (isBillingError(err)) return false;
   const msg = err instanceof Error ? err.message : String(err);
+  // GEMINI_TIMEOUT ni retry qilma — "50000ms" ichida "500" bor, false positive beradi
+  if (msg.includes("GEMINI_TIMEOUT")) return false;
   return (
     msg.includes("429") ||
     msg.includes("503") ||
@@ -82,6 +84,12 @@ export async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T
     }
   }
   throw lastErr;
+}
+
+// ─── Markdown escape (MarkdownV1: * _ ` [ ) ──────────────────────────────────
+
+function escapeMd(text: string): string {
+  return text.replace(/[_*`[]/g, "\\$&");
 }
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
@@ -133,6 +141,12 @@ QOIDALAR:
 - MUHIM: eslatmalar (set_reminder) FAQAT Shahriyorning o'ziga keladi. Boshqalarga xabar yuborish uchun send_message yoki send_voice_message ishlatiladi.
 - taqvim ko'rish/qo'shish → get_calendar / add_calendar_event | end yo'q bo'lsa: start + 1 soat
 - jadval o'qish → read_sheet | jadvalga yozish → append_sheet | katak yangilash → update_sheet_cell
+- AVTOMATIK JADVAL QOIDALARI (foydalanuvchi "yoz", "saqlа" demasa ham):
+  • kunlik xarajat (kafe, restoran, transport, bozor, do'kon, oziq-ovqat, kommunal + summa) → "Xarajatlar" sheetga darhol append_sheet, format: "DD.MM.YYYY|kategoriya|tavsif|summa (raqam)|"
+  • mahsulot/tovar narxi (parfyum, kosmetika, kiyim, telefon, texnika, har qanday tovar + narx) → "Mahsulotlar" sheetga darhol append_sheet, format: "DD.MM.YYYY|mahsulot nomi|narxi (raqam)|miqdori (yo'q bo'lsa 1)|jami"
+  • kategoriyani o'zing aniqlа: "kafe 30000" → kategoriya="Ovqat", tavsif="kafe"
+  • summani raqamga aylantir: "50 ming"→50000, "1.2M"→1200000, "500k"→500000
+  • append_sheet dan KEYIN qisqa tasdiqlov: "✅ Xarajatlar ga yozildi: kafe — 30 000 so'm"
 - foydalanuvchi xulq-atvor/format ko'rsatmasi bersа ("bunday qil", "shunday yoz") → update_memory preference sifatida saqlа, DARHOL o'sha uslubda davom et
 - XOTIRA da preferences bo'lsa — ularni HAR DOIM qat'iy bajar`;
 }
@@ -325,17 +339,23 @@ export const appendSheetTool = {
   name: "append_sheet",
   description:
     "Google Sheets ga yangi qator qo'shish. " +
-    "\"Buyurtma yoz\", \"Jadvalga qo'sh\", \"Yozib ol\" so'rovlarida chaqiring.",
+    "Aniq so'rov bo'lmasa ham AVTOMATIK chaqir: " +
+    "kunlik xarajat (kafe/transport/bozor + summa) → sheet=\"Xarajatlar\", values=\"DD.MM.YYYY|kategoriya|tavsif|summa|\"; " +
+    "mahsulot narxi (parfyum/kosmetika/tovar + narx) → sheet=\"Mahsulotlar\", values=\"DD.MM.YYYY|nom|narx|miqdor|jami\".",
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
       sheet: {
         type: SchemaType.STRING,
-        description: "Sheet (varaq) nomi. Misol: \"Buyurtmalar\", \"Sheet1\"",
+        description: "Sheet nomi: \"Xarajatlar\" (kunlik harajatlar) | \"Mahsulotlar\" (tovar narxlari) | boshqa sheet nomi",
       },
       values: {
         type: SchemaType.STRING,
-        description: "Qator qiymatlari | bilan ajratilgan. Misol: \"2026-05-07|Sardor|Chanel No5|450000|yetkazildi\"",
+        description:
+          "Qator qiymatlari | bilan ajratilgan.\n" +
+          "Xarajatlar: \"09.05.2026|Ovqat|kafe|30000|\"\n" +
+          "Mahsulotlar: \"09.05.2026|Chanel No5|850000|1|850000\"\n" +
+          "Summalar faqat raqam (50 ming→50000, 1.2M→1200000).",
       },
     },
     required: ["sheet", "values"],
@@ -419,9 +439,12 @@ export async function handleTool(
     return await getCalendarEvents(Math.min(Math.max(days, 1), 90));
   }
   if (name === "add_calendar_event") {
-    const { title, start, end, description, location } = args as {
-      title: string; start: string; end: string; description?: string; location?: string;
+    const { title, start, description, location } = args as {
+      title: string; start: string; description?: string; location?: string;
     };
+    // end berilmasa system prompt qoidasiga ko'ra start + 1 soat
+    const end = (args.end as string | undefined) ??
+      new Date(new Date(start).getTime() + 60 * 60 * 1000).toISOString();
     return await addCalendarEvent(title, start, end, description, location);
   }
   if (name === "read_sheet") {
@@ -429,8 +452,11 @@ export async function handleTool(
     return await readSheet(range);
   }
   if (name === "append_sheet") {
-    const { sheet, values } = args as { sheet: string; values: string };
-    const cells = values.split("|").map((v) => v.trim());
+    const { sheet } = args as { sheet: string };
+    const rawValues = args.values;
+    const cells = Array.isArray(rawValues)
+      ? (rawValues as unknown[]).map(String)
+      : String(rawValues).split("|").map((v) => v.trim());
     return await appendSheetRow(sheet, cells);
   }
   if (name === "update_sheet_cell") {
@@ -556,7 +582,7 @@ export async function generateWithSearch(
       .slice(0, 5)
       .map((w) => {
         const uri = w.uri.replace(/_/g, "%5F").replace(/\)/g, "%29");
-        return `• [${w.title}](${uri})`;
+        return `• [${escapeMd(w.title)}](${uri})`;
       });
     return all.length ? `${text}\n\n📎 *Manbalar:*\n${all.join("\n")}` : text;
   }
@@ -593,7 +619,7 @@ export async function generateWithSearch(
     .slice(0, 3)
     .map((s) => {
       const uri = s.uri.replace(/_/g, "%5F").replace(/\)/g, "%29");
-      return `• [${s.title}](${uri})`;
+      return `• [${escapeMd(s.title)}](${uri})`;
     });
 
   const body = result2.join("\n\n");
@@ -626,7 +652,12 @@ export async function generateReply(
   });
 
   // Oxirgi 6 xabar (3 almashuv) — kontekst uchun yetarli, ortiqcha token sarflanmaydi
-  const chat = model.startChat({ history: trimHistory(history).slice(-6) });
+  // Gemini SDK: history har doim "user" bilan boshlanishi kerak
+  const rawHistory = trimHistory(history).slice(-6);
+  const safeHistory = rawHistory.length > 0 && rawHistory[0].role !== "user"
+    ? rawHistory.slice(1)
+    : rawHistory;
+  const chat = model.startChat({ history: safeHistory });
 
   let result = await withRetry(() =>
     withTimeout(chat.sendMessage(safeText), GEMINI_TIMEOUT_MS)

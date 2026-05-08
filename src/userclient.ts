@@ -1,8 +1,9 @@
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
-import { Api } from "telegram";
 
 // ─── Client ───────────────────────────────────────────────────────────────────
+
+const USERCLIENT_TIMEOUT_MS = 30_000;
 
 function makeClient(): TelegramClient {
   const apiId = parseInt(process.env.TELEGRAM_API_ID ?? "0");
@@ -20,15 +21,27 @@ function makeClient(): TelegramClient {
   });
 }
 
+function withDeadline<T>(promise: Promise<T>): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("USERCLIENT_TIMEOUT")), USERCLIENT_TIMEOUT_MS)
+    ),
+  ]);
+}
+
 // ─── Send message ─────────────────────────────────────────────────────────────
 
-export async function sendUserMessage(uid: number, to: string, message: string): Promise<void> {
+export async function sendUserMessage(_uid: number, to: string, message: string): Promise<void> {
   const client = makeClient();
-  await client.connect();
-  // disconnect in finally — but don't let disconnect error mask the original
   let sendError: unknown;
   try {
-    await client.sendMessage(to, { message });
+    await withDeadline(
+      (async () => {
+        await client.connect();
+        await client.sendMessage(to, { message });
+      })()
+    );
   } catch (err) {
     sendError = err;
   }
@@ -38,17 +51,21 @@ export async function sendUserMessage(uid: number, to: string, message: string):
 
 // ─── Send voice message ───────────────────────────────────────────────────────
 
-export async function sendUserVoiceMessage(uid: number, to: string, audioBuffer: Buffer): Promise<void> {
+export async function sendUserVoiceMessage(_uid: number, to: string, audioBuffer: Buffer): Promise<void> {
   const client = makeClient();
-  await client.connect();
   let sendError: unknown;
   try {
-    // voiceNote: true — Telegram da mikrofon belgisi bilan ko'rinadi
-    await client.sendFile(to, {
-      file: audioBuffer,
-      voiceNote: true,
-      forceDocument: false,
-    });
+    await withDeadline(
+      (async () => {
+        await client.connect();
+        // voiceNote: true — Telegram da mikrofon belgisi bilan ko'rinadi
+        await client.sendFile(to, {
+          file: audioBuffer,
+          voiceNote: true,
+          forceDocument: false,
+        });
+      })()
+    );
   } catch (err) {
     sendError = err;
   }

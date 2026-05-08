@@ -30,7 +30,7 @@ if (!process.env.TELEGRAM_WEBHOOK_SECRET) {
 
 // ─── Server ───────────────────────────────────────────────────────────────────
 
-const PORT = Number(process.env.PORT) || 9000;
+const PORT = Number(process.env.PORT) || 8080;
 
 app.listen(PORT, () => {
   console.log(`✅ Server port ${PORT} da ishlamoqda`);

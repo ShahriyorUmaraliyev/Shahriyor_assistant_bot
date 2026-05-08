@@ -12,6 +12,12 @@ import {
   TRANSLATE_LANGS, TRANSLATE_KEYBOARD, CHANGE_LANG_KEYBOARD,
 } from "./translate";
 
+// ─── Markdown escape (MarkdownV1: * _ ` [ ) ──────────────────────────────────
+
+function escapeMd(text: string): string {
+  return text.replace(/[_*`[]/g, "\\$&");
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 const allowedIds = new Set<number>(
@@ -174,7 +180,7 @@ function audioErrorMessage(err: unknown): string {
   if (msg.includes("TTS_NO_AUDIO"))
     return "🔇 Ovozli javob yaratib bo'lmadi. Matn rejimiga o'tildi.";
   if (msg.includes("GEMINI_TIMEOUT"))
-    return "⏱ AI javob berishda vaqt tugadi (25 sek). Qayta urinib ko'ring.";
+    return "⏱ AI javob berishda vaqt tugadi (50 sek). Qayta urinib ko'ring.";
   if (msg.includes("404") || msg.includes("not found") || msg.includes("NOT_FOUND"))
     return "❌ AI modeli topilmadi. Dastur xatoligi — admin xabardor qilindi.";
   if (msg.includes("429") || msg.includes("quota") || msg.includes("RESOURCE_EXHAUSTED"))
@@ -290,8 +296,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       lines.push("👥 *Kontaktlar:*");
       for (const [name, data] of contacts) {
         const phone = data.phone ? `📞 ${data.phone}` : "";
-        const notes = data.notes ? ` — ${data.notes}` : "";
-        lines.push(`• ${name}${phone ? ": " + phone : ""}${notes}`);
+        const notes = data.notes ? ` — ${escapeMd(data.notes)}` : "";
+        lines.push(`• ${escapeMd(name)}${phone ? ": " + phone : ""}${notes}`);
       }
     } else {
       lines.push("👥 *Kontaktlar:* yo'q");
@@ -303,8 +309,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       lines.push("\n🛍 *Mahsulotlar:*");
       for (const [name, data] of products) {
         const price = data.price ? `${data.price.toLocaleString()} so'm` : "";
-        const desc = data.description ? ` — ${data.description}` : "";
-        lines.push(`• ${name}${price ? ": " + price : ""}${desc}`);
+        const desc = data.description ? ` — ${escapeMd(data.description)}` : "";
+        lines.push(`• ${escapeMd(name)}${price ? ": " + price : ""}${desc}`);
       }
     } else {
       lines.push("\n🛍 *Mahsulotlar:* yo'q");
@@ -314,7 +320,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     const notes = memory.notes ?? [];
     if (notes.length > 0) {
       lines.push("\n📝 *Yozuvlar:*");
-      notes.slice(-10).forEach((n, i) => lines.push(`${i + 1}. ${n}`));
+      notes.slice(-10).forEach((n, i) => lines.push(`${i + 1}. ${escapeMd(n)}`));
     } else {
       lines.push("\n📝 *Yozuvlar:* yo'q");
     }
@@ -323,7 +329,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     const prefs = memory.preferences ?? [];
     if (prefs.length > 0) {
       lines.push("\n⚙️ *Ko'rsatmalar:*");
-      prefs.forEach((p, i) => lines.push(`${i + 1}. ${p}`));
+      prefs.forEach((p, i) => lines.push(`${i + 1}. ${escapeMd(p)}`));
     } else {
       lines.push("\n⚙️ *Ko'rsatmalar:* yo'q");
     }
@@ -349,6 +355,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     const lastLang = await getTranslateLang(userId);
     if (lastLang && TRANSLATE_LANGS[lastLang]) {
       await sendTyping(chatId);
+      const typingInterval1 = setInterval(() => sendTyping(chatId), 4_000);
       let translated: string;
       try {
         translated = await translateText(inputText, lastLang);
@@ -356,12 +363,14 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
         console.error("translateText xatosi:", err);
         await sendMessage(chatId, translateErrorMessage(err));
         return;
+      } finally {
+        clearInterval(typingInterval1);
       }
       const lang = TRANSLATE_LANGS[lastLang];
       const preview = inputText.length > 120 ? inputText.slice(0, 120) + "…" : inputText;
       await sendMessage(
         chatId,
-        `${lang.flag} *${lang.name}:*\n${translated}\n\n_Asl:_ ${preview}`,
+        `${lang.flag} *${lang.name}:*\n${escapeMd(translated)}\n\n_Asl:_ ${escapeMd(preview)}`,
         { reply_markup: CHANGE_LANG_KEYBOARD }
       );
     } else {
@@ -387,6 +396,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
   // ── Ma'lumotlarni parallel yuklash ─────────────────────────────────────────
 
   await sendTyping(chatId);
+  // Telegram typing 5s da o'chadi — voice 110s gacha, text tool call bilan 50s+ oladi
+  const typingInterval = setInterval(() => sendTyping(chatId).catch(() => {}), 4_000);
 
   const [history, memory, mode] = await Promise.all([
     getHistory(userId),
@@ -401,6 +412,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     try {
       audioBuffer = await downloadVoice(voice.file_id, voice.file_size);
     } catch (err) {
+      clearInterval(typingInterval);
       console.error("Voice download xatosi:", err);
       await sendMessage(chatId, audioErrorMessage(err));
       return;
@@ -411,6 +423,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     try {
       transcribed = await transcribeVoice(audioBuffer);
     } catch (err) {
+      clearInterval(typingInterval);
       console.error("Transcription xatosi:", err);
       await sendMessage(chatId, audioErrorMessage(err));
       return;
@@ -421,11 +434,13 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     try {
       reply = await generateReply(transcribed, history, memory, userId, mode);
     } catch (err) {
+      clearInterval(typingInterval);
       console.error("generateReply (voice) xatosi:", err);
       await sendMessage(chatId, geminiErrorMessage(err));
       return;
     }
 
+    clearInterval(typingInterval);
     // Tarixda actual matn saqlanadi — keyingi suhbatda context to'g'ri bo'ladi
     await saveHistory(userId, [
       ...history,
@@ -444,11 +459,13 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     try {
       reply = await generateReply(text, history, memory, userId, mode);
     } catch (err) {
+      clearInterval(typingInterval);
       console.error("generateReply xatosi:", err);
       await sendMessage(chatId, geminiErrorMessage(err));
       return;
     }
 
+    clearInterval(typingInterval);
     await saveHistory(userId, [
       ...history,
       { role: "user", text, timestamp: Date.now() },
@@ -532,6 +549,12 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
     return;
   }
 
+  // Noma'lum callback — Telegram animatsiyasini to'xtatish (aks holda tugma abadiy "loading")
+  if (!data.startsWith("tr:")) {
+    await answerCallback(query.id);
+    return;
+  }
+
   // "tr:{lang}" — til tanlandi
   if (data.startsWith("tr:")) {
     const langCode = data.slice(3);
@@ -550,6 +573,7 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
 
     await answerCallback(query.id, `${langInfo.flag} Tarjima qilinmoqda…`);
     await sendTyping(chatId);
+    const typingInterval2 = setInterval(() => sendTyping(chatId), 4_000);
 
     let translated: string;
     try {
@@ -558,6 +582,8 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
       console.error("handleCallbackQuery translateText xatosi:", err);
       await sendMessage(chatId, translateErrorMessage(err));
       return;
+    } finally {
+      clearInterval(typingInterval2);
     }
 
     await setTranslateLang(userId, langCode);
@@ -565,7 +591,7 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
     const preview = pending.length > 120 ? pending.slice(0, 120) + "…" : pending;
     await sendMessage(
       chatId,
-      `${langInfo.flag} *${langInfo.name}:*\n${translated}\n\n_Asl:_ ${preview}`,
+      `${langInfo.flag} *${langInfo.name}:*\n${escapeMd(translated)}\n\n_Asl:_ ${escapeMd(preview)}`,
       { reply_markup: CHANGE_LANG_KEYBOARD }
     );
     return;

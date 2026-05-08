@@ -23,11 +23,16 @@ export async function scheduleReminder(
   const minTime = Math.floor(Date.now() / 1000) + 60;
   const safeNotBefore = Math.max(notBefore, minTime);
 
-  const result = await getQStash().publishJSON({
-    url: `${APP_URL}/api/remind`,
-    body: { userId, text },
-    notBefore: safeNotBefore,
-  });
+  const result = await Promise.race<{ messageId: string }>([
+    getQStash().publishJSON({
+      url: `${APP_URL}/api/remind`,
+      body: { userId, text },
+      notBefore: safeNotBefore,
+    }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("QSTASH_TIMEOUT: 10s")), 10_000)
+    ),
+  ]);
 
   return result.messageId;
 }
