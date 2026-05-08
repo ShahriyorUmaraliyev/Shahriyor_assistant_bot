@@ -9,8 +9,14 @@ function getAuth() {
   if (_auth) return _auth;
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON sozlanmagan");
-  const creds = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
-  _auth = new google.auth.GoogleAuth({ credentials: creds, scopes: SCOPES });
+  let creds: unknown;
+  try {
+    creds = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
+  } catch {
+    throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON base64 yoki JSON formati noto'g'ri");
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  _auth = new google.auth.GoogleAuth({ credentials: creds as any, scopes: SCOPES });
   return _auth;
 }
 

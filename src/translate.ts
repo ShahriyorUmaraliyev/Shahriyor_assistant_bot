@@ -103,7 +103,9 @@ export async function translateText(text: string, targetLang: string): Promise<s
   }
 
   const data = (await res.json()) as TranslateResponse;
-  return data.data.translations[0].translatedText;
+  const translated = data.data?.translations?.[0]?.translatedText;
+  if (!translated) throw new Error("TRANSLATE_EMPTY_RESPONSE");
+  return translated;
 }
 
 export function translateErrorMessage(err: unknown): string {
@@ -118,5 +120,7 @@ export function translateErrorMessage(err: unknown): string {
     return "⏱ Tarjima so'rovi uzoq ketdi. Qayta urinib ko'ring.";
   if (msg.includes("TRANSLATE_INVALID_REQUEST"))
     return "❌ Noto'g'ri so'rov. Matnni tekshirib qayta yuboring.";
+  if (msg.includes("TRANSLATE_EMPTY_RESPONSE"))
+    return "❌ Tarjima bo'sh javob qaytardi. Qayta urinib ko'ring.";
   return `❌ Tarjima xatolik: ${msg.slice(0, 80)}`;
 }

@@ -46,7 +46,7 @@ export async function getCurrentWeather(city: string): Promise<string> {
     res = await owmFetch(url);
   } catch (err) {
     if ((err as Error).name === "AbortError") return "Ob-havo ma'lumoti olishda vaqt tugadi (5s).";
-    throw err;
+    return "Ob-havo xizmatiga ulanishda tarmoq xatosi. Qayta urinib ko'ring.";
   }
 
   if (res.status === 404) return `"${city}" shahri topilmadi. Inglizcha to'g'ri nom kiriting (masalan: Tashkent).`;
@@ -79,7 +79,7 @@ export async function getForecastWeather(city: string, days = 1): Promise<string
     res = await owmFetch(url);
   } catch (err) {
     if ((err as Error).name === "AbortError") return "Ob-havo ma'lumoti olishda vaqt tugadi (5s).";
-    throw err;
+    return "Ob-havo xizmatiga ulanishda tarmoq xatosi. Qayta urinib ko'ring.";
   }
 
   if (res.status === 404) return `"${city}" shahri topilmadi.`;

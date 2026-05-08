@@ -43,8 +43,9 @@ export async function patchMemory(
     if (memory.notes.length > 50) memory.notes.shift();
   }
   if (patch.preference) {
+    if (!memory.preferences) memory.preferences = [];
     memory.preferences.push(patch.preference);
-    if (memory.preferences.length > 20) memory.preferences.shift();
+    if (memory.preferences.length > 50) memory.preferences.shift();
   }
 
   await saveMemory(userId, memory);

@@ -111,7 +111,8 @@ app.post("/api/remind", async (req: Request, res: Response) => {
   const qstashMsgId = req.headers["upstash-message-id"] as string | undefined;
 
   try {
-    await sendReminderMessage(userId, `⏰ *Eslatma:*\n${text}`);
+    const safeText = text.replace(/[_*`[]/g, "\\$&");
+    await sendReminderMessage(userId, `⏰ *Eslatma:*\n${safeText}`);
     if (qstashMsgId) {
       clearDeliveredReminder(userId, qstashMsgId).catch((err) =>
         console.warn("[remind] Redis o'chirish xato:", err)
