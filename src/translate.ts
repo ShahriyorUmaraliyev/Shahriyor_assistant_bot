@@ -14,6 +14,8 @@ export const TRANSLATE_LANGS: Record<string, LangInfo> = {
   en: { code: "en", name: "English",  flag: "🇬🇧" },
   ru: { code: "ru", name: "Русский",  flag: "🇷🇺" },
   tr: { code: "tr", name: "Türkçe",   flag: "🇹🇷" },
+  ar: { code: "ar", name: "العربية",  flag: "🇸🇦" },
+  zh: { code: "zh", name: "中文",      flag: "🇨🇳" },
 };
 
 export const TRANSLATE_KEYBOARD = {
@@ -25,6 +27,10 @@ export const TRANSLATE_KEYBOARD = {
     [
       { text: "🇷🇺 Русский", callback_data: "tr:ru" },
       { text: "🇹🇷 Türkçe",  callback_data: "tr:tr" },
+    ],
+    [
+      { text: "🇸🇦 العربية", callback_data: "tr:ar" },
+      { text: "🇨🇳 中文",     callback_data: "tr:zh" },
     ],
   ],
 };
