@@ -31,8 +31,14 @@ if (missing.length) {
 if (!process.env.ALLOWED_USER_IDS) {
   console.warn("⚠️  ALLOWED_USER_IDS yo'q — hech kim botdan foydalana olmaydi!");
 }
+if (!process.env.GOOGLE_TRANSLATE_API_KEY) {
+  console.warn("ℹ️  GOOGLE_TRANSLATE_API_KEY yo'q — /translate komandasi ishlamaydi!");
+}
 if (!process.env.OPENWEATHERMAP_API_KEY) {
-  console.warn("ℹ️  OPENWEATHERMAP_API_KEY yo'q — ob-havo ishlaydi, lekin ma'lumot kelmasligi mumkin.");
+  console.warn("ℹ️  OPENWEATHERMAP_API_KEY yo'q — ob-havo tool ishlamaydi!");
+}
+if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+  console.warn("ℹ️  GOOGLE_SERVICE_ACCOUNT_JSON yo'q — Calendar/Sheets toollar ishlamaydi!");
 }
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;

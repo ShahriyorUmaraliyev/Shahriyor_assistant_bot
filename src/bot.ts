@@ -1,7 +1,7 @@
 import type { TelegramMessage, TelegramCallbackQuery } from "./types";
 import {
   getHistory, saveHistory, clearHistory, getUserMode, setUserMode,
-  getTranslateLang, setTranslateLang, getTranslatePending, setTranslatePending,
+  getTranslateLang, setTranslateLang, getTranslatePending, setTranslatePending, clearTranslatePending,
 } from "./redis";
 import { getMemory } from "./memory";
 import { generateReply, generateWithSearch, classifyGeminiError } from "./gemini";
