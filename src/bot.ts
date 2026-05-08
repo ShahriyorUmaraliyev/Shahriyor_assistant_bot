@@ -1,9 +1,16 @@
-import type { TelegramMessage } from "./types";
-import { getHistory, saveHistory, clearHistory, getUserMode, setUserMode } from "./redis";
+import type { TelegramMessage, TelegramCallbackQuery } from "./types";
+import {
+  getHistory, saveHistory, clearHistory, getUserMode, setUserMode,
+  getTranslateLang, setTranslateLang, getTranslatePending, setTranslatePending,
+} from "./redis";
 import { getMemory } from "./memory";
 import { generateReply, generateWithSearch, classifyGeminiError } from "./gemini";
 import { downloadVoice, transcribeVoice, textToSpeech } from "./audio";
 import { hasSession } from "./userclient";
+import {
+  translateText, translateErrorMessage,
+  TRANSLATE_LANGS, TRANSLATE_KEYBOARD, CHANGE_LANG_KEYBOARD,
+} from "./translate";
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -43,9 +50,10 @@ async function tgFetch(url: string, init: RequestInit): Promise<Response> {
 
 const MAIN_KEYBOARD = {
   keyboard: [
-    [{ text: "🔍 /search" }, { text: "📦 /memory" }],
-    [{ text: "🔊 /voice"  }, { text: "💬 /text"   }],
-    [{ text: "🗑 /clear"  }, { text: "🔗 /auth_tg" }],
+    [{ text: "🔍 /search" },    { text: "📦 /memory"  }],
+    [{ text: "🌐 /translate" }, { text: "🔊 /voice"   }],
+    [{ text: "💬 /text" },      { text: "🗑 /clear"   }],
+    [{ text: "🔗 /auth_tg" }],
   ],
   resize_keyboard: true,
   persistent: true,
@@ -59,13 +67,14 @@ export async function setupBotCommands(): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       commands: [
-        { command: "start",   description: "🤖 Botni ishga tushirish / menyu"   },
-        { command: "search",  description: "🔍 Google orqali real vaqt qidiruv" },
-        { command: "voice",   description: "🔊 Ovozli javob rejimini yoqish"    },
-        { command: "text",    description: "💬 Matnli javob rejimini yoqish"    },
-        { command: "memory",  description: "📦 Saqlangan xotirani ko'rish"      },
-        { command: "clear",   description: "🗑 Suhbat tarixini tozalash"        },
-        { command: "auth_tg", description: "🔗 Telegram hisobi holati"          },
+        { command: "start",     description: "🤖 Botni ishga tushirish / menyu"      },
+        { command: "search",    description: "🔍 Google orqali real vaqt qidiruv"    },
+        { command: "translate", description: "🌐 Matnni tarjima qilish"              },
+        { command: "voice",     description: "🔊 Ovozli javob rejimini yoqish"       },
+        { command: "text",      description: "💬 Matnli javob rejimini yoqish"       },
+        { command: "memory",    description: "📦 Saqlangan xotirani ko'rish"         },
+        { command: "clear",     description: "🗑 Suhbat tarixini tozalash"           },
+        { command: "auth_tg",   description: "🔗 Telegram hisobi holati"             },
       ],
     }),
   }).catch((err) => console.error("[setupBotCommands] xato:", err));
@@ -325,6 +334,44 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     return;
   }
 
+  if (text === "/translate" || text?.startsWith("/translate ")) {
+    const inputText = text.slice("/translate".length).trim();
+    if (!inputText) {
+      await sendMessage(
+        chatId,
+        "🌐 Tarjima qilmoqchi bo'lgan matnni yozing:\n`/translate Bonjour le monde`"
+      );
+      return;
+    }
+
+    await setTranslatePending(userId, inputText);
+
+    const lastLang = await getTranslateLang(userId);
+    if (lastLang && TRANSLATE_LANGS[lastLang]) {
+      await sendTyping(chatId);
+      let translated: string;
+      try {
+        translated = await translateText(inputText, lastLang);
+      } catch (err) {
+        console.error("translateText xatosi:", err);
+        await sendMessage(chatId, translateErrorMessage(err));
+        return;
+      }
+      const lang = TRANSLATE_LANGS[lastLang];
+      const preview = inputText.length > 120 ? inputText.slice(0, 120) + "…" : inputText;
+      await sendMessage(
+        chatId,
+        `${lang.flag} *${lang.name}:*\n${translated}\n\n_Asl:_ ${preview}`,
+        { reply_markup: CHANGE_LANG_KEYBOARD }
+      );
+    } else {
+      await sendMessage(chatId, "🌐 Qaysi tilga tarjima qilsin?", {
+        reply_markup: TRANSLATE_KEYBOARD,
+      });
+    }
+    return;
+  }
+
   if (text === "/voice") {
     await setUserMode(userId, "voice");
     await sendMessage(chatId, "🔊 Ovozli javob rejimi yoqildi. /text — matn rejimine qaytish.");
@@ -442,6 +489,87 @@ function filterVoiceDisclaimers(text: string): string {
     .trim();
 
   return cleaned || "Bajarildi.";
+}
+
+// ─── answerCallbackQuery — Telegram loading animatsiyasini to'xtatadi ────────
+
+async function answerCallback(callbackId: string, text?: string): Promise<void> {
+  await tgFetch(`${TG}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackId, text: text ?? "" }),
+  }).catch(() => {}); // kritik emas
+}
+
+// ─── Inline keyboard callback handler (tarjima til tanlovi) ──────────────────
+
+export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> {
+  const userId = query.from.id;
+  const chatId = query.message?.chat.id;
+  const data   = query.data;
+
+  if (!chatId || !data) {
+    await answerCallback(query.id);
+    return;
+  }
+  if (!isAllowed(userId)) {
+    await answerCallback(query.id, "❌ Ruxsat yo'q");
+    return;
+  }
+
+  // "tr:change" — til o'zgartirish tugmasi
+  if (data === "tr:change") {
+    const pending = await getTranslatePending(userId);
+    if (!pending) {
+      await answerCallback(query.id, "⚠️ Matn topilmadi");
+      await sendMessage(chatId, "⚠️ Tarjima matni topilmadi. Qayta `/translate matn` yuboring.");
+      return;
+    }
+    await answerCallback(query.id);
+    await sendMessage(chatId, "🌐 Qaysi tilga tarjima qilsin?", {
+      reply_markup: TRANSLATE_KEYBOARD,
+    });
+    return;
+  }
+
+  // "tr:{lang}" — til tanlandi
+  if (data.startsWith("tr:")) {
+    const langCode = data.slice(3);
+    const langInfo = TRANSLATE_LANGS[langCode];
+    if (!langInfo) {
+      await answerCallback(query.id, "❌ Noma'lum til");
+      return;
+    }
+
+    const pending = await getTranslatePending(userId);
+    if (!pending) {
+      await answerCallback(query.id, "⚠️ Matn topilmadi");
+      await sendMessage(chatId, "⚠️ Tarjima matni topilmadi. Qayta `/translate matn` yuboring.");
+      return;
+    }
+
+    await answerCallback(query.id, `${langInfo.flag} Tarjima qilinmoqda…`);
+    await sendTyping(chatId);
+
+    let translated: string;
+    try {
+      translated = await translateText(pending, langCode);
+    } catch (err) {
+      console.error("handleCallbackQuery translateText xatosi:", err);
+      await sendMessage(chatId, translateErrorMessage(err));
+      return;
+    }
+
+    await setTranslateLang(userId, langCode);
+
+    const preview = pending.length > 120 ? pending.slice(0, 120) + "…" : pending;
+    await sendMessage(
+      chatId,
+      `${langInfo.flag} *${langInfo.name}:*\n${translated}\n\n_Asl:_ ${preview}`,
+      { reply_markup: CHANGE_LANG_KEYBOARD }
+    );
+    return;
+  }
 }
 
 // ─── Reply delivery: matn yoki ovoz ──────────────────────────────────────────

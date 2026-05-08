@@ -1,8 +1,16 @@
 // ─── Telegram ─────────────────────────────────────────────────────────────────
 
+export interface TelegramCallbackQuery {
+  id: string;
+  from: TelegramUser;
+  message?: TelegramMessage;
+  data?: string;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
 }
 
 export interface TelegramMessage {
@@ -59,12 +67,14 @@ export interface UserMemory {
   contacts: Record<string, Contact>;
   products: Record<string, Product>;
   notes: string[];
+  preferences: string[];
 }
 
 export const EMPTY_MEMORY: UserMemory = {
   contacts: {},
   products: {},
   notes: [],
+  preferences: [],
 };
 
 // ─── User Settings ────────────────────────────────────────────────────────────

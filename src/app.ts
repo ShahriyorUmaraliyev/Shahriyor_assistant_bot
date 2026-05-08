@@ -1,6 +1,6 @@
 import express, { type Request, type Response } from "express";
 import { Receiver } from "@upstash/qstash";
-import { handleMessage } from "./bot";
+import { handleMessage, handleCallbackQuery } from "./bot";
 import type { TelegramUpdate, ReminderPayload } from "./types";
 
 const app = express();
@@ -70,6 +70,11 @@ app.post("/webhook", (req: Request, res: Response) => {
   if (update?.message) {
     handleMessage(update.message).catch((err) =>
       console.error("handleMessage xatosi:", err)
+    );
+  }
+  if (update?.callback_query) {
+    handleCallbackQuery(update.callback_query).catch((err) =>
+      console.error("handleCallbackQuery xatosi:", err)
     );
   }
 });
