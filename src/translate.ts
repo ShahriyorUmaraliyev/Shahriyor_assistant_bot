@@ -9,15 +9,31 @@ export interface LangInfo {
   code: string;
 }
 
+// Barcha qo'llab-quvvatlanadigan tillar
 export const TRANSLATE_LANGS: Record<string, LangInfo> = {
-  uz: { code: "uz", name: "O'zbek",   flag: "🇺🇿" },
-  en: { code: "en", name: "English",  flag: "🇬🇧" },
-  ru: { code: "ru", name: "Русский",  flag: "🇷🇺" },
-  tr: { code: "tr", name: "Türkçe",   flag: "🇹🇷" },
-  ar: { code: "ar", name: "العربية",  flag: "🇸🇦" },
-  zh: { code: "zh", name: "中文",      flag: "🇨🇳" },
+  uz: { code: "uz", name: "O'zbek",     flag: "🇺🇿" },
+  en: { code: "en", name: "English",    flag: "🇬🇧" },
+  ru: { code: "ru", name: "Русский",    flag: "🇷🇺" },
+  tr: { code: "tr", name: "Türkçe",     flag: "🇹🇷" },
+  ar: { code: "ar", name: "العربية",    flag: "🇸🇦" },
+  zh: { code: "zh", name: "中文",        flag: "🇨🇳" },
+  fr: { code: "fr", name: "Français",   flag: "🇫🇷" },
+  de: { code: "de", name: "Deutsch",    flag: "🇩🇪" },
+  es: { code: "es", name: "Español",    flag: "🇪🇸" },
+  it: { code: "it", name: "Italiano",   flag: "🇮🇹" },
+  ko: { code: "ko", name: "한국어",      flag: "🇰🇷" },
+  ja: { code: "ja", name: "日本語",      flag: "🇯🇵" },
+  hi: { code: "hi", name: "हिन्दी",     flag: "🇮🇳" },
+  fa: { code: "fa", name: "فارسی",      flag: "🇮🇷" },
+  pt: { code: "pt", name: "Português",  flag: "🇧🇷" },
+  pl: { code: "pl", name: "Polski",     flag: "🇵🇱" },
+  uk: { code: "uk", name: "Українська", flag: "🇺🇦" },
+  nl: { code: "nl", name: "Nederlands", flag: "🇳🇱" },
+  sv: { code: "sv", name: "Svenska",    flag: "🇸🇪" },
+  ro: { code: "ro", name: "Română",     flag: "🇷🇴" },
 };
 
+// Asosiy 6 til uchun inline keyboard (tez kirish)
 export const TRANSLATE_KEYBOARD = {
   inline_keyboard: [
     [
@@ -41,6 +57,13 @@ export const CHANGE_LANG_KEYBOARD = {
   ],
 };
 
+// Barcha til kodlarini qisqa ro'yxat sifatida qaytaradi (yordam uchun)
+export function langListText(): string {
+  return Object.entries(TRANSLATE_LANGS)
+    .map(([code, l]) => `${l.flag} \`${code}\` — ${l.name}`)
+    .join("\n");
+}
+
 interface TranslateResponse {
   data: {
     translations: Array<{ translatedText: string }>;
@@ -51,7 +74,6 @@ export async function translateText(text: string, targetLang: string): Promise<s
   const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY;
   if (!apiKey) throw new Error("TRANSLATE_KEY_MISSING");
 
-  // Google Translate API: maks 5000 belgi per so'rov
   const truncated = text.length > 5000 ? text.slice(0, 5000) : text;
 
   const ctrl = new AbortController();

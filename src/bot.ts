@@ -8,7 +8,7 @@ import { generateReply, generateWithSearch, classifyGeminiError } from "./gemini
 import { downloadVoice, transcribeVoice, textToSpeech } from "./audio";
 import { hasSession } from "./userclient";
 import {
-  translateText, translateErrorMessage,
+  translateText, translateErrorMessage, langListText,
   TRANSLATE_LANGS, TRANSLATE_KEYBOARD, CHANGE_LANG_KEYBOARD,
 } from "./translate";
 import { getReminders } from "./reminder";
@@ -365,17 +365,75 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
   }
 
   if (text === "/translate" || text?.startsWith("/translate ")) {
-    const inputText = text.slice("/translate".length).trim();
-    if (!inputText) {
+    const after = text.slice("/translate".length).trim();
+
+    // Yordam: /translate tillar
+    if (after === "tillar" || after === "langs" || after === "list") {
       await sendMessage(
         chatId,
-        "🌐 Tarjima qilmoqchi bo'lgan matnni yozing:\n`/translate Bonjour le monde`"
+        `🌐 *Mavjud tillar:*\n\n${langListText()}\n\n` +
+        `_Ishlatish: \`/translate [kod] matn\`_\n` +
+        `_Misol: \`/translate fr Bonjour le monde\`_`
       );
       return;
     }
 
+    if (!after) {
+      await sendMessage(
+        chatId,
+        "🌐 *Tarjima qilish:*\n\n" +
+        "`/translate matn` — oxirgi tilga tarjima\n" +
+        "`/translate [kod] matn` — muayyan tilga tarjima\n\n" +
+        "_Misol:_\n" +
+        "`/translate Hello world` — oxirgi tanlangan tilga\n" +
+        "`/translate fr Hello world` — fransuzchaga\n" +
+        "`/translate ja こんにちは` — yaponchaga\n\n" +
+        "Barcha tillar: `/translate tillar`"
+      );
+      return;
+    }
+
+    // Birinchi so'z til kodi bo'lishi mumkin (2-3 harf)
+    const firstWord = after.split(" ")[0].toLowerCase();
+    let targetLangCode: string | null = null;
+    let inputText: string;
+
+    if (/^[a-z]{2,3}$/.test(firstWord) && TRANSLATE_LANGS[firstWord]) {
+      targetLangCode = firstWord;
+      inputText = after.slice(firstWord.length).trim();
+      if (!inputText) {
+        await sendMessage(chatId, `🌐 \`${firstWord}\` tilga tarjima qilish uchun matn kiriting:\n\`/translate ${firstWord} Salom dunyo\``);
+        return;
+      }
+    } else {
+      inputText = after;
+    }
+
     await setTranslatePending(userId, inputText);
 
+    // Til kodi berilgan bo'lsa — to'g'ridan tarjima
+    if (targetLangCode) {
+      await sendTyping(chatId);
+      let translated: string;
+      try {
+        translated = await translateText(inputText, targetLangCode);
+      } catch (err) {
+        console.error("translateText xatosi:", err);
+        await sendMessage(chatId, translateErrorMessage(err));
+        return;
+      }
+      const lang = TRANSLATE_LANGS[targetLangCode];
+      const preview = inputText.length > 120 ? inputText.slice(0, 120) + "…" : inputText;
+      await setTranslateLang(userId, targetLangCode);
+      await sendMessage(
+        chatId,
+        `${lang.flag} *${lang.name}:*\n${translated}\n\n_Asl:_ ${preview}`,
+        { reply_markup: CHANGE_LANG_KEYBOARD }
+      );
+      return;
+    }
+
+    // Til kodi yo'q — oxirgi tilni ishlatamiz yoki keyboard ko'rsatamiz
     const lastLang = await getTranslateLang(userId);
     if (lastLang && TRANSLATE_LANGS[lastLang]) {
       await sendTyping(chatId);
