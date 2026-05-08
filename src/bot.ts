@@ -106,20 +106,20 @@ export async function sendMessage(
   }
 }
 
-async function sendTyping(chatId: number): Promise<void> {
+async function sendTyping(chatId: number, action: "typing" | "record_voice" = "typing"): Promise<void> {
   await tgFetch(`${TG}/sendChatAction`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, action: "typing" }),
-  }).catch(() => {}); // typing xatosi kritik emas
+    body: JSON.stringify({ chat_id: chatId, action }),
+  }).catch(() => {}); // chat action xatosi kritik emas
 }
 
-async function sendVoiceMessage(chatId: number, mp3Buffer: Buffer): Promise<void> {
+async function sendVoiceMessage(chatId: number, wavBuffer: Buffer): Promise<void> {
   const form = new FormData();
   form.append("chat_id", String(chatId));
   form.append(
     "voice",
-    new Blob([mp3Buffer], { type: "audio/wav" }),
+    new Blob([wavBuffer], { type: "audio/wav" }),
     "reply.wav"
   );
   const ctrl = new AbortController();
@@ -175,7 +175,7 @@ function audioErrorMessage(err: unknown): string {
   if (msg.includes("TTS_NO_AUDIO"))
     return "🔇 Ovozli javob yaratib bo'lmadi. Matn rejimiga o'tildi.";
   if (msg.includes("GEMINI_TIMEOUT"))
-    return "⏱ AI javob berishda vaqt tugadi (25 sek). Qayta urinib ko'ring.";
+    return "⏱ AI javob berishda vaqt tugadi (50 sek). Qayta urinib ko'ring.";
   if (msg.includes("404") || msg.includes("not found") || msg.includes("NOT_FOUND"))
     return "❌ AI modeli topilmadi. Dastur xatoligi — admin xabardor qilindi.";
   if (msg.includes("429") || msg.includes("quota") || msg.includes("RESOURCE_EXHAUSTED"))
@@ -474,7 +474,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
 
   // ── Ma'lumotlarni parallel yuklash ─────────────────────────────────────────
 
-  await sendTyping(chatId);
+  // Ovozli xabar kelsa — "record_voice", matn kelsa — "typing" animatsiyasi
+  await sendTyping(chatId, voice ? "record_voice" : "typing");
 
   const [history, memory, mode] = await Promise.all([
     getHistory(userId),
@@ -694,8 +695,10 @@ async function deliverReply(
 
   const ttsText = cleaned.length > 800 ? cleaned.slice(0, 800) + "…" : cleaned;
   try {
-    const mp3 = await textToSpeech(ttsText);
-    await sendVoiceMessage(chatId, mp3);
+    // TTS yaratilayotganda record_voice animatsiyasi — 5-10 sek davomida ko'rinadi
+    await sendTyping(chatId, "record_voice");
+    const wav = await textToSpeech(ttsText);
+    await sendVoiceMessage(chatId, wav);
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[TTS] FAILED (${errMsg}) — falling back to text`);
