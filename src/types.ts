@@ -67,7 +67,7 @@ export interface UserMemory {
   contacts: Record<string, Contact>;
   products: Record<string, Product>;
   notes: string[];
-  preferences: string[];
+  preferences: string[]; // foydalanuvchi xulq-atvor ko'rsatmalari
 }
 
 export const EMPTY_MEMORY: UserMemory = {

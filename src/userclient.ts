@@ -1,10 +1,17 @@
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
-import { Api } from "telegram";
+import { CustomFile } from "telegram/client/uploads";
 
-// ─── Client ───────────────────────────────────────────────────────────────────
+// ─── Persistent singleton client ─────────────────────────────────────────────
+// Har yuborishda connect/disconnect qilish gramjs update loop da TIMEOUT
+// xatosiga olib keladi. Bir marta ulanib, qayta ishlatish to'g'ri arxitektura.
 
-function makeClient(): TelegramClient {
+let _client: TelegramClient | null = null;
+let _connectPromise: Promise<unknown> | null = null;
+
+async function getClient(): Promise<TelegramClient> {
+  if (_client && _client.connected) return _client;
+
   const apiId = parseInt(process.env.TELEGRAM_API_ID ?? "0");
   const apiHash = process.env.TELEGRAM_API_HASH ?? "";
   const session = process.env.TELEGRAM_SESSION ?? "";
@@ -14,47 +21,44 @@ function makeClient(): TelegramClient {
   if (!session)
     throw new Error("NOT_AUTHENTICATED");
 
-  return new TelegramClient(new StringSession(session), apiId, apiHash, {
-    connectionRetries: 3,
+  // Parallel chaqiruvlar bir xil clientni kutadi
+  if (_connectPromise) {
+    await _connectPromise;
+    if (_client?.connected) return _client;
+  }
+
+  _client = new TelegramClient(new StringSession(session), apiId, apiHash, {
+    connectionRetries: 5,
     retryDelay: 1000,
   });
+
+  _connectPromise = _client.connect();
+  await _connectPromise;
+  _connectPromise = null;
+  console.log("[UserClient] Telegram ga ulandi");
+  return _client;
 }
 
 // ─── Send message ─────────────────────────────────────────────────────────────
 
-export async function sendUserMessage(uid: number, to: string, message: string): Promise<void> {
-  const client = makeClient();
-  await client.connect();
-  // disconnect in finally — but don't let disconnect error mask the original
-  let sendError: unknown;
-  try {
-    await client.sendMessage(to, { message });
-  } catch (err) {
-    sendError = err;
-  }
-  await client.disconnect().catch((e) => console.error("TelegramClient disconnect xatosi:", e));
-  if (sendError) throw sendError;
+export async function sendUserMessage(_uid: number, to: string, message: string): Promise<void> {
+  const client = await getClient();
+  await client.sendMessage(to, { message });
 }
 
 // ─── Send voice message ───────────────────────────────────────────────────────
 
-export async function sendUserVoiceMessage(uid: number, to: string, audioBuffer: Buffer): Promise<void> {
-  const client = makeClient();
-  await client.connect();
-  let sendError: unknown;
-  try {
-    // voiceNote: true — Telegram da mikrofon belgisi bilan ko'rinadi
-    await client.sendFile(to, {
-      file: audioBuffer,
-      voiceNote: true,
-      forceDocument: false,
-    });
-  } catch (err) {
-    sendError = err;
-  }
-  await client.disconnect().catch((e) => console.error("TelegramClient disconnect xatosi:", e));
-  if (sendError) throw sendError;
+export async function sendUserVoiceMessage(_uid: number, to: string, audioBuffer: Buffer): Promise<void> {
+  const client = await getClient();
+  const file = new CustomFile("voice.wav", audioBuffer.length, "", audioBuffer);
+  await client.sendFile(to, {
+    file,
+    voiceNote: true,
+    forceDocument: false,
+  });
 }
+
+// ─── Session mavjudligini tekshirish ──────────────────────────────────────────
 
 export async function hasSession(_uid: number): Promise<boolean> {
   return !!(process.env.TELEGRAM_SESSION);

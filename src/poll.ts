@@ -97,7 +97,7 @@ async function poll(): Promise<void> {
       }
     } catch (err) {
       errorCount++;
-      const wait = Math.min(errorCount * 3_000, 30_000);
+      const wait = Math.min(errorCount * 2_000, 15_000);
       console.error(`[polling] Xatolik (${errorCount}x), ${wait / 1000}s kutilmoqda:`, err);
       await sleep(wait);
     }

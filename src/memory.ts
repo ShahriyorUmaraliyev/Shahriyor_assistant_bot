@@ -5,14 +5,9 @@ import { getRedis } from "./redis";
 const memoryKey = (userId: number) => `memory:${userId}`;
 
 export async function getMemory(userId: number): Promise<UserMemory> {
-  return (
-    (await getRedis().get<UserMemory>(memoryKey(userId))) ?? {
-      ...EMPTY_MEMORY,
-      contacts: {},
-      products: {},
-      notes: [],
-    }
-  );
+  const stored = await getRedis().get<UserMemory>(memoryKey(userId));
+  if (!stored) return { ...EMPTY_MEMORY };
+  return { ...stored, preferences: stored.preferences ?? [] };
 }
 
 export async function saveMemory(
@@ -28,6 +23,7 @@ export async function patchMemory(
     contacts?: Record<string, { phone?: string; notes?: string }>;
     products?: Record<string, { price?: number; description?: string }>;
     note?: string;
+    preference?: string;
   }
 ): Promise<void> {
   const memory = await getMemory(userId);
@@ -44,7 +40,11 @@ export async function patchMemory(
   }
   if (patch.note) {
     memory.notes.push(patch.note);
-    if (memory.notes.length > 50) memory.notes.shift(); // keep max 50 notes
+    if (memory.notes.length > 50) memory.notes.shift();
+  }
+  if (patch.preference) {
+    memory.preferences.push(patch.preference);
+    if (memory.preferences.length > 20) memory.preferences.shift();
   }
 
   await saveMemory(userId, memory);

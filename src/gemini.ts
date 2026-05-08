@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import type { UserMemory, ChatMessage } from "./types";
 import { patchMemory, getMemory } from "./memory";
-import { scheduleReminder } from "./reminder";
+import { scheduleReminder, cancelReminder, getReminders } from "./reminder";
 import { sendUserMessage, sendUserVoiceMessage } from "./userclient";
 import { getCalendarEvents, addCalendarEvent } from "./gcalendar";
 import { readSheet, appendSheetRow, updateSheetCell } from "./gsheets";
@@ -254,6 +254,38 @@ export const sendVoiceMessageTool = {
   },
 };
 
+export const listRemindersTool = {
+  name: "list_reminders",
+  description:
+    "Barcha rejalashtirilgan eslatmalarni ko'rish. " +
+    "\"Eslatmalarimni ko'rsat\", \"Qanday eslatmalar bor\", \"Eslatmalar ro'yxati\" so'rovlarida chaqiring.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {},
+  },
+};
+
+export const cancelReminderTool = {
+  name: "cancel_reminder",
+  description:
+    "Rejalashtirilgan eslatmani bekor qilish. " +
+    "\"Eslatmani o'chir\", \"Bekor qil\", \"Ertangi soat 10 dagi eslatmani olib tashla\" so'rovlarida chaqiring. " +
+    "Avval list_reminders bilan ro'yxatni oling, keyin ID yoki matn bo'yicha qidiring.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      id: {
+        type: SchemaType.STRING,
+        description: "Eslatma ID si (list_reminders dan olingan oxirgi 8 belgi yoki to'liq ID)",
+      },
+      text_hint: {
+        type: SchemaType.STRING,
+        description: "Eslatma matni bo'yicha qidiruv (ID ma'lum bo'lmasa). Masalan: 'uchrashuv', 'dori'",
+      },
+    },
+  },
+};
+
 export const getCalendarTool = {
   name: "get_calendar",
   description:
@@ -408,6 +440,43 @@ export async function handleTool(
     }
     await sendUserMessage(userId, recipient, message);
     return `Xabar yuborildi.`;
+  }
+  if (name === "list_reminders") {
+    const reminders = await getReminders(userId);
+    const now = Math.floor(Date.now() / 1000);
+    const upcoming = reminders
+      .filter((r) => r.notBefore > now)
+      .sort((a, b) => a.notBefore - b.notBefore);
+    if (!upcoming.length) return "Rejalashtirilgan eslatma yo'q.";
+    return upcoming
+      .map((r, i) => {
+        const d = new Date(r.notBefore * 1000);
+        const fmt = d.toLocaleString("uz-UZ", {
+          timeZone: "Asia/Tashkent",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        return `${i + 1}. ${fmt} — "${r.text}" (ID: ${r.id.slice(-8)})`;
+      })
+      .join("\n");
+  }
+  if (name === "cancel_reminder") {
+    const { id, text_hint } = args as { id?: string; text_hint?: string };
+    const reminders = await getReminders(userId);
+    const now = Math.floor(Date.now() / 1000);
+    const upcoming = reminders.filter((r) => r.notBefore > now);
+    let target = upcoming.find((r) => id && (r.id === id || r.id.endsWith(id)));
+    if (!target && text_hint) {
+      const hint = text_hint.toLowerCase();
+      target = upcoming.find((r) => r.text.toLowerCase().includes(hint));
+    }
+    if (!target) return "Bekor qilinishi kerak bo'lgan eslatma topilmadi. Avval eslatmalar ro'yxatini ko'ring.";
+    const ok = await cancelReminder(userId, target.id);
+    return ok
+      ? `✅ Eslatma bekor qilindi: "${target.text}"`
+      : "Eslatma topilmadi yoki allaqachon yuborilgan.";
   }
   if (name === "get_weather") {
     const { city, days } = args as { city: string; days?: number };
@@ -615,8 +684,8 @@ export async function generateReply(
     systemInstruction: buildSystemPrompt(memory, mode),
     tools: [
       { functionDeclarations: [
-        updateMemoryTool, setReminderTool, getWeatherTool,
-        sendMessageTool, sendVoiceMessageTool,
+        updateMemoryTool, setReminderTool, listRemindersTool, cancelReminderTool,
+        getWeatherTool, sendMessageTool, sendVoiceMessageTool,
         getCalendarTool, addCalendarEventTool,
         readSheetTool, appendSheetTool, updateSheetTool,
       ]},

@@ -1,15 +1,17 @@
 import express, { type Request, type Response } from "express";
 import { Receiver } from "@upstash/qstash";
 import { handleMessage, handleCallbackQuery } from "./bot";
+import { clearDeliveredReminder } from "./redis";
 import type { TelegramUpdate, ReminderPayload } from "./types";
 
 const app = express();
 
 // Raw body middleware — QStash signature verification requires raw string
 app.use((req: Request, _res: Response, next) => {
-  let raw = "";
-  req.on("data", (chunk) => (raw += chunk.toString()));
+  const chunks: Buffer[] = [];
+  req.on("data", (chunk: Buffer) => chunks.push(chunk));
   req.on("end", () => {
+    const raw = Buffer.concat(chunks).toString("utf8");
     (req as Request & { rawBody: string }).rawBody = raw;
     try {
       req.body = raw ? JSON.parse(raw) : {};
@@ -105,8 +107,16 @@ app.post("/api/remind", async (req: Request, res: Response) => {
     return;
   }
 
+  // QStash har doim upstash-message-id headerini yuboradi — Redis'dan o'chirish uchun
+  const qstashMsgId = req.headers["upstash-message-id"] as string | undefined;
+
   try {
     await sendReminderMessage(userId, `⏰ *Eslatma:*\n${text}`);
+    if (qstashMsgId) {
+      clearDeliveredReminder(userId, qstashMsgId).catch((err) =>
+        console.warn("[remind] Redis o'chirish xato:", err)
+      );
+    }
     res.status(200).json({ ok: true });
   } catch (err) {
     console.error("Reminder xatosi:", err);

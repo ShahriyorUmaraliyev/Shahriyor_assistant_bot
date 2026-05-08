@@ -11,6 +11,7 @@ import {
   translateText, translateErrorMessage,
   TRANSLATE_LANGS, TRANSLATE_KEYBOARD, CHANGE_LANG_KEYBOARD,
 } from "./translate";
+import { getReminders } from "./reminder";
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -50,10 +51,10 @@ async function tgFetch(url: string, init: RequestInit): Promise<Response> {
 
 const MAIN_KEYBOARD = {
   keyboard: [
-    [{ text: "🔍 /search" },    { text: "📦 /memory"  }],
-    [{ text: "🌐 /translate" }, { text: "🔊 /voice"   }],
-    [{ text: "💬 /text" },      { text: "🗑 /clear"   }],
-    [{ text: "🔗 /auth_tg" }],
+    [{ text: "🔍 /search"    }, { text: "📦 /memory"   }],
+    [{ text: "🌐 /translate" }, { text: "🔊 /voice"    }],
+    [{ text: "⏰ /reminders" }, { text: "💬 /text"     }],
+    [{ text: "🗑 /clear"    }, { text: "🔗 /auth_tg"  }],
   ],
   resize_keyboard: true,
   persistent: true,
@@ -67,14 +68,15 @@ export async function setupBotCommands(): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       commands: [
-        { command: "start",     description: "🤖 Botni ishga tushirish / menyu"      },
-        { command: "search",    description: "🔍 Google orqali real vaqt qidiruv"    },
-        { command: "translate", description: "🌐 Matnni tarjima qilish"              },
-        { command: "voice",     description: "🔊 Ovozli javob rejimini yoqish"       },
-        { command: "text",      description: "💬 Matnli javob rejimini yoqish"       },
-        { command: "memory",    description: "📦 Saqlangan xotirani ko'rish"         },
-        { command: "clear",     description: "🗑 Suhbat tarixini tozalash"           },
-        { command: "auth_tg",   description: "🔗 Telegram hisobi holati"             },
+        { command: "start",     description: "🤖 Botni ishga tushirish / menyu"              },
+        { command: "search",    description: "🔍 Google orqali real vaqt qidiruv"          },
+        { command: "translate", description: "🌐 Matnni tarjima qilish"                    },
+        { command: "voice",     description: "🔊 Ovozli javob rejimini yoqish"             },
+        { command: "text",      description: "💬 Matnli javob rejimini yoqish"             },
+        { command: "memory",    description: "📦 Saqlangan xotirani ko'rish"               },
+        { command: "clear",     description: "🗑 Suhbat tarixini tozalash"                 },
+        { command: "reminders", description: "⏰ Rejalashtirilgan eslatmalarni ko'rish"    },
+        { command: "auth_tg",   description: "🔗 Telegram hisobi holati"                  },
       ],
     }),
   }).catch((err) => console.error("[setupBotCommands] xato:", err));
@@ -232,6 +234,35 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
         "`TELEGRAM_SESSION` nomi bilan qo'shing va redeploy qiling."
       );
     }
+    return;
+  }
+
+  if (text === "/reminders") {
+    const reminders = await getReminders(userId);
+    const now = Math.floor(Date.now() / 1000);
+    const upcoming = reminders
+      .filter((r) => r.notBefore > now)
+      .sort((a, b) => a.notBefore - b.notBefore);
+    if (!upcoming.length) {
+      await sendMessage(chatId, "📭 Rejalashtirilgan eslatma yo'q.\n\nEslatma qo'shish: \"Ertaga soat 10 da Alibek bilan uchrashuv\"");
+      return;
+    }
+    const lines = upcoming.map((r, i) => {
+      const d = new Date(r.notBefore * 1000);
+      const fmt = d.toLocaleString("uz-UZ", {
+        timeZone: "Asia/Tashkent",
+        month: "short",
+        day: "numeric",
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      return `${i + 1}. 🕐 *${fmt}*\n   ${r.text}`;
+    });
+    await sendMessage(
+      chatId,
+      `⏰ *Eslatmalar (${upcoming.length} ta):*\n\n${lines.join("\n\n")}\n\n_Bekor qilish: "Birinchi eslatmani o'chir"_`
+    );
     return;
   }
 

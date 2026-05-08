@@ -1,4 +1,6 @@
 import { Client } from "@upstash/qstash";
+import { saveReminder, deleteReminder, getReminders } from "./redis";
+import type { StoredReminder } from "./redis";
 
 const APP_URL = process.env.APP_URL?.replace(/\/$/, "") ?? null;
 
@@ -29,5 +31,28 @@ export async function scheduleReminder(
     notBefore: safeNotBefore,
   });
 
-  return result.messageId;
+  const id = result.messageId;
+
+  // Redis'ga saqlaymiz — keyinchalik ro'yxat ko'rsatish va bekor qilish uchun
+  await saveReminder(userId, {
+    id,
+    text,
+    timeIso: new Date(safeNotBefore * 1000).toISOString(),
+    notBefore: safeNotBefore,
+  }).catch((err) => console.warn("[reminder] Redis saqlash xato:", err));
+
+  return id;
 }
+
+export async function cancelReminder(userId: number, id: string): Promise<boolean> {
+  try {
+    await getQStash().messages.delete(id);
+  } catch (err) {
+    // Allaqachon yuborilgan yoki noto'g'ri ID — Redis'dan baribir o'chiramiz
+    console.warn("[cancelReminder] QStash cancel xato (ehtimol allaqachon yuborilgan):", err);
+  }
+  return deleteReminder(userId, id);
+}
+
+export { getReminders };
+export type { StoredReminder };
