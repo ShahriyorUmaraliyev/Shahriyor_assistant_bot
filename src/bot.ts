@@ -54,7 +54,7 @@ const MAIN_KEYBOARD = {
     [{ text: "🔍 /search"    }, { text: "📦 /memory"   }],
     [{ text: "🌐 /translate" }, { text: "🔊 /voice"    }],
     [{ text: "⏰ /reminders" }, { text: "💬 /text"     }],
-    [{ text: "🗑 /clear"    }, { text: "🔗 /auth_tg"  }],
+    [{ text: "🗑 /clear" }],
   ],
   resize_keyboard: true,
   persistent: true,
@@ -76,7 +76,6 @@ export async function setupBotCommands(): Promise<void> {
         { command: "memory",    description: "📦 Saqlangan xotirani ko'rish"               },
         { command: "clear",     description: "🗑 Suhbat tarixini tozalash"                 },
         { command: "reminders", description: "⏰ Rejalashtirilgan eslatmalarni ko'rish"    },
-        { command: "auth_tg",   description: "🔗 Telegram hisobi holati"                  },
       ],
     }),
   }).catch((err) => console.error("[setupBotCommands] xato:", err));
