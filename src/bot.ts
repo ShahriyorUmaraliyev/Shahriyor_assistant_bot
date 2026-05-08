@@ -495,7 +495,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       return;
     }
 
-    // 1-qadam: audio → matn (tools yo'q, oddiy generateContent)
+    // 1-qadam: audio → matn
     let transcribed: string;
     try {
       transcribed = await transcribeVoice(audioBuffer);
@@ -505,7 +505,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       return;
     }
 
-    // 2-qadam: transcribed matn → javob (xuddi matnli xabar kabi, tools bilan)
+    // 2-qadam: transcribed matn → javob (tools bilan); typing yangilanib turadi
+    const voiceTypingTimer = setInterval(() => sendTyping(chatId, "record_voice").catch(() => {}), 4_000);
     let reply: string;
     try {
       reply = await generateReply(transcribed, history, memory, userId, mode);
@@ -513,9 +514,10 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       console.error("generateReply (voice) xatosi:", err);
       await sendMessage(chatId, geminiErrorMessage(err));
       return;
+    } finally {
+      clearInterval(voiceTypingTimer);
     }
 
-    // Tarixda actual matn saqlanadi — keyingi suhbatda context to'g'ri bo'ladi
     await saveHistory(userId, [
       ...history,
       { role: "user", text: `🎤 ${transcribed}`, timestamp: Date.now() },
@@ -529,6 +531,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
   // ── Matnli xabar ──────────────────────────────────────────────────────────
 
   if (text) {
+    // Gemini (ayniqsa tool call bilan) 10-20 sek ishlaydi — typing har 4s yangilanadi
+    const typingTimer = setInterval(() => sendTyping(chatId).catch(() => {}), 4_000);
     let reply: string;
     try {
       reply = await generateReply(text, history, memory, userId, mode);
@@ -536,6 +540,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       console.error("generateReply xatosi:", err);
       await sendMessage(chatId, geminiErrorMessage(err));
       return;
+    } finally {
+      clearInterval(typingTimer);
     }
 
     await saveHistory(userId, [
