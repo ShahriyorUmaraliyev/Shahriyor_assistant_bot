@@ -12,7 +12,7 @@
  */
 
 import "dotenv/config";
-import { handleMessage, setupBotCommands } from "./bot";
+import { handleMessage, handleCallbackQuery, setupBotCommands } from "./bot";
 import type { TelegramUpdate } from "./types";
 
 // ─── Env validation (faqat polling uchun keraklilari) ────────────────────────
@@ -62,7 +62,7 @@ async function poll(): Promise<void> {
   while (true) {
     try {
       const res = await fetch(
-        `${TG}/getUpdates?offset=${offset}&timeout=25&allowed_updates=["message"]`,
+        `${TG}/getUpdates?offset=${offset}&timeout=25&allowed_updates=["message","callback_query"]`,
         { signal: AbortSignal.timeout(35_000) }
       );
 
@@ -92,6 +92,15 @@ async function poll(): Promise<void> {
 
           handleMessage(msg).catch((err) =>
             console.error("❌ handleMessage xatosi:", err)
+          );
+        }
+        if (update.callback_query) {
+          const cb = update.callback_query;
+          const who = cb.from?.username ?? cb.from?.first_name ?? cb.from?.id;
+          console.log(`🔘 ${who}: [callback] ${cb.data}`);
+
+          handleCallbackQuery(cb).catch((err) =>
+            console.error("❌ handleCallbackQuery xatosi:", err)
           );
         }
       }
