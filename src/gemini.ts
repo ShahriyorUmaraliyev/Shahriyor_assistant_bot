@@ -122,9 +122,11 @@ export function buildSystemPrompt(memory: UserMemory, mode: "text" | "voice" = "
 
   const modeNote = mode === "voice"
     ? `JORIY REJIM: OVOZLI.
-TEXNIK ARXITEKTURA: sen faqat matn yozasan → sistema uni TTS orqali AVTOMATIK ovozga aylantiradi → Telegram ovozli xabar sifatida yuboradi. Bu jarayon har doim ishlaydi.
+TEXNIK ARXITEKTURA: sen faqat matn yozasan → sistema uni TTS orqali AVTOMATIK ovozga aylantiradi → foydalanuvchiga ovozli xabar sifatida yuboradi. Bu jarayon har doim ishlaydi.
 QOIDA: hech qachon "ovozli xabar yubora olmayman" / "faqat matn" / "imkonim yo'q" dema — bu mutlaqo noto'g'ri.
-MISOL: foydalanuvchi "salom deb ovozli xabar yubor" desa → sen shunchaki "Salom!" deb yoz → sistema ovozga aylantiradi.`
+FARQ (MUHIM):
+• Foydalanuvchi senden savol so'rasa yoki suhbat qilsa → shunchaki matn yoz, sistema ovozga aylantiradi. send_voice_message CHAQIRMA.
+• Foydalanuvchi "Azizaga", "Bobonga", "do'stimga" kabi KONTAKT nomini aytib ovozli xabar yuborishni so'rasa → send_voice_message tool chaqir.`
     : "JORIY REJIM: MATN — javoblar matn sifatida keladi. /voice buyrug'i bilan ovozli rejimga o'tish mumkin.";
 
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
@@ -138,6 +140,7 @@ QOIDALAR:
 - kontaktga MATNLI xabar yuborish → send_message tool ni DARHOL chaqir, hech qanday tekshiruvsiz
 - kontaktga OVOZLI xabar yuborish → send_voice_message tool ni DARHOL chaqir, hech qanday tekshiruvsiz
 - MUHIM: "ulanganmi", "imkon bor" kabi savollarni hech qachon berma — tool ni chaqir, natijani ko'r
+- MUHIM: tool avval xato bergan bo'lsa ham — QAYTA chaqir, hech qachon "ishlamaydi" deb o'z-o'zidan javob berma
 - MUHIM: eslatmalar (set_reminder) FAQAT Shahriyorning o'ziga keladi. Boshqalarga xabar yuborish uchun send_message yoki send_voice_message ishlatiladi.
 - taqvim ko'rish/qo'shish → get_calendar / add_calendar_event | end yo'q bo'lsa: start + 1 soat
 - jadval o'qish → read_sheet | jadvalga yozish → append_sheet | katak yangilash → update_sheet_cell
@@ -303,8 +306,10 @@ export const cancelReminderTool = {
 export const getCalendarTool = {
   name: "get_calendar",
   description:
-    "Google Calendar dan kelgusi tadbirlarni ko'rish. " +
-    "\"Bugun nima bor?\", \"Bu hafta nima rejalashtirilgan?\", \"Taqvimim\", \"Uchrashuvlar\" so'rovlarida chaqiring.",
+    "Google Calendar dan kelgusi tadbirlar va eslatmalarni ko'rish. " +
+    "\"Bugun nima bor?\", \"Bu hafta nima rejalashtirilgan?\", \"Taqvimim\", \"Uchrashuvlar\", " +
+    "\"Calendarda nima bor?\", \"Calendarda eslatma bor?\", \"Rejalarim\" so'rovlarida DARHOL chaqiring. " +
+    "Avval xato bergan bo'lsa ham — har doim chaqir, natijani ko'r.",
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
@@ -547,12 +552,21 @@ export async function handleTool(
       if (recipient === contact)
         return `"${contact}" kontaktining telefon raqami xotirada topilmadi. Avval kontakt raqamini saqlang.`;
     }
-    // textToSpeech dynamic import — audio.ts gemini.ts dan import qiladi (sirkular)
     const { textToSpeech } = await import("./audio");
     const safeMsg = message.slice(0, 800);
-    const audioBuffer = await textToSpeech(safeMsg);
-    await sendUserVoiceMessage(userId, recipient, audioBuffer);
-    return `Ovozli xabar yuborildi: "${safeMsg.slice(0, 50)}${safeMsg.length > 50 ? "…" : ""}"`;
+    try {
+      const audioBuffer = await textToSpeech(safeMsg);
+      await sendUserVoiceMessage(userId, recipient, audioBuffer);
+      return `Ovozli xabar yuborildi: "${safeMsg.slice(0, 50)}${safeMsg.length > 50 ? "…" : ""}"`;
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      console.error("[send_voice_message] xato:", msg);
+      if (msg.includes("TTS_NO_AUDIO"))
+        return `Ovozli xabar yaratib bo'lmadi (TTS xato). "${recipient}" ga matnli xabar yuborishni buyuring.`;
+      if (msg.includes("USERCLIENT_TIMEOUT"))
+        return "Telegram bilan aloqa uzilib qoldi. Qayta urinib ko'ring.";
+      return `Ovozli xabar yuborishda xato: ${msg.slice(0, 100)}`;
+    }
   }
   return "Noma'lum funksiya.";
 }

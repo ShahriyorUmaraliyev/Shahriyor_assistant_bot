@@ -59,17 +59,9 @@ export async function downloadVoice(
 }
 
 // ─── 2. Audio Input: OGG → matn (transcription) ──────────────────────────────
-// gemini-2.5-flash + thinkingBudget:0: audio input qo'llab-quvvatlaydi, arzon.
-// generateContent() — startChat()+tools+audio kombinatsiyasidan ishonchliroq.
 
 export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
-  // gemini-2.5-flash: audio input qo'llab-quvvatlaydi; thinkingBudget:0 bilan
-  // thinking tokenlar sarflanmaydi — transcription uchun thinking keraksiz
-  const model = getGenAI().getGenerativeModel({
-    model: "gemini-2.5-flash",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
-  });
+  const model = getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
   const result = await withRetry(() =>
     withTimeout(
       model.generateContent({
@@ -84,7 +76,7 @@ export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
                 },
               },
               {
-                text: "Transcribe this audio message. Return only the spoken words, no explanations.",
+                text: "Transcribe this audio exactly as spoken. Auto-detect the language (Uzbek, Russian, English, or any other). Return only the transcribed words — no explanations, no translations.",
               },
             ],
           },
@@ -113,64 +105,70 @@ export async function textToSpeech(text: string): Promise<Buffer> {
     `https://generativelanguage.googleapis.com/v1beta/models/` +
     `${TTS_MODEL}:generateContent?key=${apiKey}`;
 
-  // withRetry ichida status tekshiruvi ham bor — 429 retry bo'ladi
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let json: any;
-  try {
-    json = await withRetry(() =>
-      withTimeout(
+  const body = JSON.stringify({
+    contents: [{ role: "user", parts: [{ text }] }],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } },
+    },
+  });
+
+  // finishReason:OTHER vaqtinchalik Gemini xatosi — to'liq tsikl 3 marta retry
+  for (let attempt = 0; attempt <= 3; attempt++) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let json: any;
+    try {
+      json = await withTimeout(
         (async () => {
           const res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ role: "user", parts: [{ text }] }],
-              generationConfig: {
-                responseModalities: ["AUDIO"],
-                speechConfig: {
-                  voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
-                },
-              },
-            }),
+            body,
           });
           if (!res.ok) {
             const errBody = await res.text().catch(() => "");
             console.error(`[TTS] HTTP ${res.status}:`, errBody.slice(0, 300));
-            // 429 ni throw qilsak withRetry uni ushlab qayta urinadi
             throw new Error(`${res.status} TTS_HTTP`);
           }
           return res.json();
         })(),
         GEMINI_TIMEOUT_MS
-      )
-    );
-  } catch (err) {
-    const msg = (err as Error).message ?? "";
-    if (msg.includes("GEMINI_TIMEOUT")) throw new Error("GEMINI_TIMEOUT");
-    throw err;
+      );
+    } catch (err) {
+      const msg = (err as Error).message ?? "";
+      if (msg.includes("GEMINI_TIMEOUT")) throw new Error("GEMINI_TIMEOUT");
+      // 429/503 → retry
+      if ((msg.includes("429") || msg.includes("503")) && attempt < 3) {
+        await new Promise((r) => setTimeout(r, (attempt + 1) * 2_000));
+        continue;
+      }
+      throw err;
+    }
+
+    const candidate = json?.candidates?.[0];
+    const part      = candidate?.content?.parts?.[0];
+    const data: string | undefined = part?.inlineData?.data;
+
+    if (!data) {
+      console.error(`[TTS] Audio yo'q (attempt ${attempt + 1}):`, JSON.stringify({
+        finishReason: candidate?.finishReason ?? "yo'q",
+        mimeType    : part?.inlineData?.mimeType ?? null,
+      }));
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, (attempt + 1) * 2_000));
+        continue;
+      }
+      throw new Error("TTS_NO_AUDIO");
+    }
+
+    const mimeType   = (part?.inlineData?.mimeType as string) ?? "audio/pcm";
+    const rateMatch  = mimeType.match(/rate=(\d+)/i);
+    const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24_000;
+    return pcm16ToWav(Buffer.from(data, "base64"), sampleRate);
   }
 
-  const candidate = json?.candidates?.[0];
-  const part      = candidate?.content?.parts?.[0];
-  const data: string | undefined = part?.inlineData?.data;
-
-  if (!data) {
-    console.error("[TTS] Audio data yo'q:", JSON.stringify({
-      candidatesCount : json?.candidates?.length ?? 0,
-      finishReason    : candidate?.finishReason ?? "yo'q",
-      promptFeedback  : json?.promptFeedback ?? null,
-      hasText         : !!part?.text,
-      textPreview     : part?.text?.slice(0, 150) ?? null,
-      mimeType        : part?.inlineData?.mimeType ?? null,
-    }));
-    throw new Error("TTS_NO_AUDIO");
-  }
-
-  const mimeType   = (part?.inlineData?.mimeType as string) ?? "audio/pcm";
-  const rateMatch  = mimeType.match(/rate=(\d+)/i);
-  const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24_000;
-
-  return pcm16ToWav(Buffer.from(data, "base64"), sampleRate);
+  throw new Error("TTS_NO_AUDIO");
 }
 
 // ─── PCM16 → WAV (kutubxonasiz, faqat header + data) ─────────────────────────

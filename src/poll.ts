@@ -15,6 +15,18 @@ import "dotenv/config";
 import { handleMessage, handleCallbackQuery, setupBotCommands } from "./bot";
 import type { TelegramUpdate } from "./types";
 
+// GramJS _updateLoop TIMEOUT spamini to'liq o'chirish
+// (console.error, unhandledRejection, uncaughtException — hammasi shu yerda filtrlanadi)
+const _ce = console.error.bind(console);
+console.error = (...args: unknown[]) => {
+  const s = args.map(String).join(" ");
+  if (
+    (s.includes("TIMEOUT") || s.includes("ECONNRESET") || s.includes("socket hang up") || s.includes("connection closed")) &&
+    (s.includes("updates.js") || s.includes("node_modules") || s.includes("telegram"))
+  ) return;
+  _ce(...args);
+};
+
 // ─── Env validation (faqat polling uchun keraklilari) ────────────────────────
 
 const POLL_REQUIRED = [
@@ -124,6 +136,29 @@ function sleep(ms: number): Promise<void> {
 }
 
 // ─── Start ────────────────────────────────────────────────────────────────────
+
+// gramjs _updateLoop fon da TIMEOUT tashlaydi disconnect dan keyin — buni bosamiz
+function isGramjsNoise(reason: unknown): boolean {
+  const stack = (reason as Error)?.stack ?? String(reason);
+  const msg   = (reason as Error)?.message ?? String(reason);
+  return (
+    stack.includes("updates.js") ||
+    stack.includes("node_modules/telegram") ||
+    msg === "TIMEOUT" ||
+    msg.includes("TIMEOUT") ||
+    msg.includes("ECONNRESET") ||
+    msg.includes("socket hang up") ||
+    msg.includes("connection closed")
+  );
+}
+process.on("unhandledRejection", (reason) => {
+  if (isGramjsNoise(reason)) return;
+  console.error("❌ Unhandled rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  if (isGramjsNoise(err)) return;
+  console.error("❌ Uncaught exception:", err);
+});
 
 deleteWebhook()
   .then(() => setupBotCommands())

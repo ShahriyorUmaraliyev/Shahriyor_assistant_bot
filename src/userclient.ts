@@ -1,5 +1,7 @@
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
+import { CustomFile } from "telegram/client/uploads";
+import { wavToOgg } from "./convert";
 
 // ─── Client ───────────────────────────────────────────────────────────────────
 
@@ -15,10 +17,13 @@ function makeClient(): TelegramClient {
   if (!session)
     throw new Error("NOT_AUTHENTICATED");
 
-  return new TelegramClient(new StringSession(session), apiId, apiHash, {
-    connectionRetries: 3,
-    retryDelay: 1000,
+  const client = new TelegramClient(new StringSession(session), apiId, apiHash, {
+    connectionRetries: 2,
+    retryDelay: 500,
+    autoReconnect: false,
   });
+  client.setLogLevel("none");
+  return client;
 }
 
 function withDeadline<T>(promise: Promise<T>): Promise<T> {
@@ -58,9 +63,10 @@ export async function sendUserVoiceMessage(_uid: number, to: string, audioBuffer
     await withDeadline(
       (async () => {
         await client.connect();
-        // voiceNote: true — Telegram da mikrofon belgisi bilan ko'rinadi
+        const oggBuffer = await wavToOgg(audioBuffer);
+        const file = new CustomFile("voice.ogg", oggBuffer.length, "", oggBuffer);
         await client.sendFile(to, {
-          file: audioBuffer,
+          file,
           voiceNote: true,
           forceDocument: false,
         });
