@@ -2,6 +2,29 @@ import "dotenv/config";
 import app from "./app";
 import { setupBotCommands } from "./bot";
 
+// GramJS _updateLoop TIMEOUT spamini bosish (webhook mode)
+function isGramjsNoise(reason: unknown): boolean {
+  const stack = (reason as Error)?.stack ?? String(reason);
+  const msg   = (reason as Error)?.message ?? String(reason);
+  return (
+    stack.includes("updates.js") ||
+    stack.includes("node_modules/telegram") ||
+    msg === "TIMEOUT" ||
+    msg.includes("TIMEOUT") ||
+    msg.includes("ECONNRESET") ||
+    msg.includes("socket hang up") ||
+    msg.includes("connection closed")
+  );
+}
+process.on("unhandledRejection", (reason) => {
+  if (isGramjsNoise(reason)) return;
+  console.error("❌ Unhandled rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  if (isGramjsNoise(err)) return;
+  console.error("❌ Uncaught exception:", err);
+});
+
 // ─── Startup validation — kerakli tokenlar yo'q bo'lsa darhol to'xtat ────────
 
 const REQUIRED_ENV = [
