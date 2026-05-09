@@ -5,7 +5,7 @@ import { wavToOgg } from "./convert";
 
 // ─── Client ───────────────────────────────────────────────────────────────────
 
-const USERCLIENT_TIMEOUT_MS = 30_000;
+const USERCLIENT_TIMEOUT_MS = 60_000;
 
 function makeClient(): TelegramClient {
   const apiId = parseInt(process.env.TELEGRAM_API_ID ?? "0");
