@@ -17,13 +17,11 @@ function makeClient(): TelegramClient {
   if (!session)
     throw new Error("NOT_AUTHENTICATED");
 
-  const client = new TelegramClient(new StringSession(session), apiId, apiHash, {
+  return new TelegramClient(new StringSession(session), apiId, apiHash, {
     connectionRetries: 2,
     retryDelay: 500,
     autoReconnect: false,
   });
-  client.setLogLevel("none");
-  return client;
 }
 
 function withDeadline<T>(promise: Promise<T>): Promise<T> {
