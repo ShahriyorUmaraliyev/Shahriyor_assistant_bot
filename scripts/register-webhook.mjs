@@ -18,6 +18,10 @@ if (!token || !base) {
 
 const webhookUrl = `${base}/webhook`;
 
+// Debug: token formatini tekshirish (faqat boshlanishi ko'rinadi)
+console.log(`ℹ️  Token prefix: ${token.slice(0, 10)}... (uzunlik: ${token.length})`);
+console.log(`ℹ️  Webhook URL: ${webhookUrl}`);
+
 const res = await fetch(
   `https://api.telegram.org/bot${token}/setWebhook`,
   {
