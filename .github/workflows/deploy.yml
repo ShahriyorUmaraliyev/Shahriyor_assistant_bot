@@ -35,26 +35,25 @@ jobs:
           docker push $IMAGE:latest
 
       - name: Write env vars file
-        run: |
-          cat > env.yaml <<'YAML'
-TELEGRAM_BOT_TOKEN: '${{ secrets.TELEGRAM_BOT_TOKEN }}'
-TELEGRAM_WEBHOOK_SECRET: '${{ secrets.TELEGRAM_WEBHOOK_SECRET }}'
-ALLOWED_USER_IDS: '${{ secrets.ALLOWED_USER_IDS }}'
-GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
-UPSTASH_REDIS_REST_URL: '${{ secrets.UPSTASH_REDIS_REST_URL }}'
-UPSTASH_REDIS_REST_TOKEN: '${{ secrets.UPSTASH_REDIS_REST_TOKEN }}'
-QSTASH_TOKEN: '${{ secrets.QSTASH_TOKEN }}'
-QSTASH_CURRENT_SIGNING_KEY: '${{ secrets.QSTASH_CURRENT_SIGNING_KEY }}'
-QSTASH_NEXT_SIGNING_KEY: '${{ secrets.QSTASH_NEXT_SIGNING_KEY }}'
-OPENWEATHERMAP_API_KEY: '${{ secrets.OPENWEATHERMAP_API_KEY }}'
-GOOGLE_TRANSLATE_API_KEY: '${{ secrets.GOOGLE_TRANSLATE_API_KEY }}'
-GOOGLE_SERVICE_ACCOUNT_JSON: '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}'
-GOOGLE_SHEET_ID: '${{ secrets.GOOGLE_SHEET_ID }}'
-GOOGLE_CALENDAR_ID: '${{ secrets.GOOGLE_CALENDAR_ID }}'
-TELEGRAM_API_ID: '${{ secrets.TELEGRAM_API_ID }}'
-TELEGRAM_API_HASH: '${{ secrets.TELEGRAM_API_HASH }}'
-TELEGRAM_SESSION: '${{ secrets.TELEGRAM_SESSION }}'
-YAML
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          ALLOWED_USER_IDS: ${{ secrets.ALLOWED_USER_IDS }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          QSTASH_TOKEN: ${{ secrets.QSTASH_TOKEN }}
+          QSTASH_CURRENT_SIGNING_KEY: ${{ secrets.QSTASH_CURRENT_SIGNING_KEY }}
+          QSTASH_NEXT_SIGNING_KEY: ${{ secrets.QSTASH_NEXT_SIGNING_KEY }}
+          OPENWEATHERMAP_API_KEY: ${{ secrets.OPENWEATHERMAP_API_KEY }}
+          GOOGLE_TRANSLATE_API_KEY: ${{ secrets.GOOGLE_TRANSLATE_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
+        run: node scripts/gen-env-yaml.mjs
 
       - name: Deploy to Cloud Run
         id: deploy
