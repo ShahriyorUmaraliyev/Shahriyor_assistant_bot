@@ -28,6 +28,12 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker europe-west3-docker.pkg.dev --quiet
 
+      - name: Ensure Artifact Registry repository exists
+        run: |
+          gcloud artifacts repositories create shahriyor \
+            --repository-format=docker \
+            --location=europe-west3 || true
+
       - name: Build and push Docker image
         run: |
           docker build --no-cache -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
