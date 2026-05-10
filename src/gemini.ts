@@ -762,6 +762,26 @@ export async function generateReply(
         return { functionResponse: { name: call.name, response: { result: toolResult } } };
       })
     );
+
+    // Tool xato bo'lsa 2-chi Gemini call o'tkazib yuborish
+    const isToolError = (res: string) =>
+      res.includes("sozlanmagan") ||
+      res.includes("vaqt tugadi") ||
+      res.includes("Xatolik:") ||
+      res.includes("ruxsati yo'q") ||
+      res.includes("TIMEOUT");
+    const allErrors = toolResults.every(tr =>
+      isToolError(String(tr.functionResponse.response.result))
+    );
+    if (allErrors) {
+      const first = String(toolResults[0].functionResponse.response.result);
+      if (first.includes("sozlanmagan") || first.includes("ruxsati yo'q"))
+        return "Bu funksiya hali sozlanmagan yoki ruxsat yo'q.";
+      if (first.includes("vaqt tugadi") || first.includes("TIMEOUT"))
+        return "So'rov vaqt tugadi. Qayta urinib ko'ring.";
+      return first;
+    }
+
     result = await withRetry(() =>
       withTimeout(chat.sendMessage(toolResults), GEMINI_TIMEOUT_MS)
     );

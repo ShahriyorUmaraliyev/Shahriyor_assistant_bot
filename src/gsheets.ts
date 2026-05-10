@@ -1,7 +1,7 @@
 import { google } from "googleapis";
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
-const TIMEOUT_MS = 10_000;
+const TIMEOUT_MS = 4_000;
 
 let _auth: InstanceType<typeof google.auth.GoogleAuth> | null = null;
 function getAuth() {
