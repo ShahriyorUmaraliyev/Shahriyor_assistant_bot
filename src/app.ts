@@ -55,7 +55,7 @@ async function sendReminderMessage(chatId: number, text: string): Promise<void> 
 
 // ─── /webhook — Telegram messages ────────────────────────────────────────────
 
-app.post("/webhook", (req: Request, res: Response) => {
+app.post("/webhook", async (req: Request, res: Response) => {
   const secret = req.headers["x-telegram-bot-api-secret-token"];
   if (
     process.env.TELEGRAM_WEBHOOK_SECRET &&
@@ -65,19 +65,22 @@ app.post("/webhook", (req: Request, res: Response) => {
     return;
   }
 
-  // Respond immediately — Cloud Run keeps running until async work completes
-  res.status(200).end("OK");
-
   const update = req.body as TelegramUpdate;
-  if (update?.message) {
-    handleMessage(update.message).catch((err) =>
-      console.error("handleMessage xatosi:", err)
-    );
-  }
-  if (update?.callback_query) {
-    handleCallbackQuery(update.callback_query).catch((err) =>
-      console.error("handleCallbackQuery xatosi:", err)
-    );
+  
+  try {
+    if (update?.message) {
+      await handleMessage(update.message);
+    }
+    if (update?.callback_query) {
+      await handleCallbackQuery(update.callback_query);
+    }
+  } catch (err) {
+    console.error("Webhook processing error:", err);
+  } finally {
+    // Respond AFTER work is done so Cloud Run doesn't freeze the CPU
+    if (!res.headersSent) {
+      res.status(200).end("OK");
+    }
   }
 });
 
