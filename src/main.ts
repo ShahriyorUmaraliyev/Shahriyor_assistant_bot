@@ -1,4 +1,12 @@
 import "dotenv/config";
+
+// Clean any Unicode BOM (\uFEFF) from process.env to prevent runtime and fetch errors
+for (const key in process.env) {
+  if (typeof process.env[key] === "string") {
+    process.env[key] = process.env[key]!.replace(/^\uFEFF/, "").trim();
+  }
+}
+
 import app from "./app";
 import { setupBotCommands } from "./bot";
 

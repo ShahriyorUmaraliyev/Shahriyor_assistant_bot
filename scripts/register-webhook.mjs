@@ -3,6 +3,13 @@
  * Telegram webhook ni Cloud Run URL ga ro'yxatdan o'tkazadi.
  */
 
+// Clean any Unicode BOM (\uFEFF) from process.env to prevent fetch errors
+for (const key in process.env) {
+  if (typeof process.env[key] === "string") {
+    process.env[key] = process.env[key].replace(/^\uFEFF/, "").trim();
+  }
+}
+
 const token  = process.env.TELEGRAM_BOT_TOKEN;
 const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? "";
 

@@ -1,5 +1,12 @@
 import { writeFileSync } from "fs";
 
+// Clean any Unicode BOM (\uFEFF) from process.env to prevent YAML or key errors
+for (const key in process.env) {
+  if (typeof process.env[key] === "string") {
+    process.env[key] = process.env[key].replace(/^\uFEFF/, "").trim();
+  }
+}
+
 const keys = [
   "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ALLOWED_USER_IDS",
   "GEMINI_API_KEY", "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN",

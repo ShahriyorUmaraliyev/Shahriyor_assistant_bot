@@ -4,6 +4,13 @@
  * QStash Cron rejalashtiruvchisini ro'yxatdan o'tkazadi yoki yangilaydi.
  */
 
+// Clean any Unicode BOM (\uFEFF) from process.env to prevent fetch errors
+for (const key in process.env) {
+  if (typeof process.env[key] === "string") {
+    process.env[key] = process.env[key].replace(/^\uFEFF/, "").trim();
+  }
+}
+
 const token = process.env.QSTASH_TOKEN;
 const base = process.env.APP_URL?.replace(/\/$/, "") ?? null;
 const userIdsStr = process.env.ALLOWED_USER_IDS ?? "";
