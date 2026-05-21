@@ -10,7 +10,7 @@ function getQStash(): Client {
   if (!_qstash) {
     _qstash = new Client({
       token: process.env.QSTASH_TOKEN!,
-      baseUrl: process.env.QSTASH_URL,
+      baseUrl: process.env.QSTASH_URL || "https://qstash-us-east-1.upstash.io",
     });
   }
   return _qstash;

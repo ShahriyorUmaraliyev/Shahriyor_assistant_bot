@@ -7,7 +7,7 @@
 const token = process.env.QSTASH_TOKEN;
 const base = process.env.APP_URL?.replace(/\/$/, "") ?? null;
 const userIdsStr = process.env.ALLOWED_USER_IDS ?? "";
-const qstashUrlBase = (process.env.QSTASH_URL || "https://qstash.upstash.io").replace(/\/$/, "");
+const qstashUrlBase = (process.env.QSTASH_URL || "https://qstash-us-east-1.upstash.io").replace(/\/$/, "");
 
 if (!token || !base || !userIdsStr) {
   console.warn(
