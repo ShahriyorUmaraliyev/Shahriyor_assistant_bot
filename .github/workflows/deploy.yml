@@ -95,3 +95,10 @@ jobs:
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           APP_URL: ${{ steps.deploy.outputs.url }}
         run: node scripts/register-webhook.mjs
+
+      - name: Register QStash cron schedule
+        env:
+          QSTASH_TOKEN: ${{ secrets.QSTASH_TOKEN }}
+          ALLOWED_USER_IDS: ${{ secrets.ALLOWED_USER_IDS }}
+          APP_URL: ${{ steps.deploy.outputs.url }}
+        run: node scripts/register-cron.mjs

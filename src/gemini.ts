@@ -592,41 +592,9 @@ QIDIRUV FORMATI — QAT'IY QOIDALAR:
 5. Linklar sistema tomonidan AVTOMATIK qo'shiladi — sen hech qachon link yozma.`
 }
 
-export async function generateWithSearch(
-  userText: string,
-  history: ChatMessage[],
-  memory: UserMemory,
-  _mode: "text" | "voice" = "text"
-): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const model = getGenAI().getGenerativeModel({
-    model: "gemini-2.5-flash",
-    systemInstruction: buildSearchSystemPrompt(memory),
-    tools: [{ googleSearch: {} }] as any,
-    // Grounding results are already factual — thinking tokens not needed
-    generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
-  });
-
-  // generateContent — history yuborilmaydi: Google Search o'zi yangi ma'lumot beradi,
-  // history = ortiqcha tokenlar sarfi.
-  const result = await withRetry(() =>
-    withTimeout(
-      model.generateContent({
-        contents: [
-          { role: "user", parts: [{ text: userText }] },
-        ],
-      } as any),
-      GEMINI_TIMEOUT_MS
-    )
-  );
-
-  logTokenUsage("search", result.response as any);
-
-  const text = result.response.text()?.trim();
-  if (!text) return "🔍 Qidiruv natijasi topilmadi. Boshqacha so'rab ko'ring.";
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const meta = (result.response as any).candidates?.[0]?.groundingMetadata;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function processGroundingLinks(text: string, response: any): string {
+  const meta = response.candidates?.[0]?.groundingMetadata;
   const chunks: Array<{ web?: { uri?: string; title?: string } }> = meta?.groundingChunks ?? [];
   const supports: Array<{
     groundingChunkIndices?: number[];
@@ -634,10 +602,6 @@ export async function generateWithSearch(
   }> = meta?.groundingSupports ?? [];
 
   if (!chunks.length) return text;
-
-  // Har bir paragrafning oxiriga tegishli manba linkini qo'shish.
-  // groundingSupports: text segment (endIndex) → chunk indeks.
-  // Paragraflarni ajratib, har biriga eng yaqin support ni topamiz.
 
   const paragraphs = text.split(/\n{2,}/).filter((p) => p.trim());
 
@@ -699,14 +663,88 @@ export async function generateWithSearch(
   const unused = segLinks
     .filter((s) => !usedUris.has(s.uri))
     .filter((s, i, a) => a.findIndex((x) => x.uri === s.uri) === i)
-    .slice(0, 3)
+    .slice(0, 5)
     .map((s) => {
       const uri = s.uri.replace(/_/g, "%5F").replace(/\)/g, "%29");
       return `• [${escapeMd(s.title)}](${uri})`;
     });
 
   const body = result2.join("\n\n");
-  return unused.length ? `${body}\n\n📎 *Boshqa manbalar:*\n${unused.join("\n")}` : body;
+  return unused.length ? `${body}\n\n📎 *Qo'shimcha manbalar:*\n${unused.join("\n")}` : body;
+}
+
+export async function generateWithSearch(
+  userText: string,
+  history: ChatMessage[],
+  memory: UserMemory,
+  _mode: "text" | "voice" = "text"
+): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const model = getGenAI().getGenerativeModel({
+    model: "gemini-2.5-flash",
+    systemInstruction: buildSearchSystemPrompt(memory),
+    tools: [{ googleSearch: {} }] as any,
+    // Grounding results are already factual — thinking tokens not needed
+    generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
+  });
+
+  // generateContent — history yuborilmaydi: Google Search o'zi yangi ma'lumot beradi,
+  // history = ortiqcha tokenlar sarfi.
+  const result = await withRetry(() =>
+    withTimeout(
+      model.generateContent({
+        contents: [
+          { role: "user", parts: [{ text: userText }] },
+        ],
+      } as any),
+      GEMINI_TIMEOUT_MS
+    )
+  );
+
+  logTokenUsage("search", result.response as any);
+
+  const text = result.response.text()?.trim();
+  if (!text) return "🔍 Qidiruv natijasi topilmadi. Boshqacha so'rab ko'ring.";
+
+  return processGroundingLinks(text, result.response);
+}
+
+export async function generateDailyAINews(memory: UserMemory): Promise<string> {
+  const model = getGenAI().getGenerativeModel({
+    model: "gemini-2.5-flash",
+    systemInstruction: `Siz Shahriyor Umaraliyevning shaxsiy AI yordamchisisiz.
+Sizning vazifangiz: Sun'iy Intellekt (AI/SI) sohasidagi bugungi eng so'nggi, eng muhim, tasdiqlangan va qiziqarli yangiliklarni internetdan (Google Search yordamida) topish hamda ularni chiroyli tahrirlangan O'zbek tilidagi daigest (sarala) ko'rinishida taqdim etish.
+
+Qoidalar:
+1. Sarlavha: "📰 *Bugungi Sun'iy Intellekt (SI) Yangiliklari Daigesti*" bo'lsin. Undan so'ng albatta bugungi sanani ko'rsating.
+2. Faqat tasdiqlangan va ishonchli manbalardan (OpenAI, Google, Anthropic, TechCrunch, Wired va hk) olingan eng so'nggi yangiliklarni bering.
+3. Har bir yangilikni alohida paragrafda, chiroyli qisqacha tavsifi (3-4 ta gap) bilan va o'qish uchun havola (link) qo'shilgan holda bering.
+4. Jami 3-5 ta eng yirik va eng qiziqarli yangilikni kiriting.
+5. Har bir yangilik tasdiqlanganligiga ishonch hosil qiling, mish-mishlarni yozmang.
+6. Linklar Google Search grounding metadata orqali avtomatik ravishda qo'shiladi. Siz o'z matningizda hech qanday soxta yoki qo'lda yozilgan havola yozmang.
+7. Uslub professional, jozibador va mutlaqo tushunarli bo'lsin.`,
+    tools: [{ googleSearch: {} }] as any,
+    generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
+  });
+
+  const query = "Bugungi sun'iy intellekt (SI / AI) sohasidagi eng muhim, tasdiqlangan va yirik yangiliklar hamda maqolalar";
+  const result = await withRetry(() =>
+    withTimeout(
+      model.generateContent({
+        contents: [
+          { role: "user", parts: [{ text: query }] },
+        ],
+      } as any),
+      GEMINI_TIMEOUT_MS
+    )
+  );
+
+  logTokenUsage("daily-news", result.response as any);
+
+  const text = result.response.text()?.trim();
+  if (!text) return "📰 Bugun sun'iy intellekt bo'yicha yangi ma'lumotlar topilmadi.";
+
+  return processGroundingLinks(text, result.response);
 }
 
 export async function generateReply(
