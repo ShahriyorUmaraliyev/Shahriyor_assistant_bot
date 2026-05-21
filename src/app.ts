@@ -1,6 +1,6 @@
 import express, { type Request, type Response } from "express";
 import { Receiver } from "@upstash/qstash";
-import { handleMessage, handleCallbackQuery } from "./bot";
+import { handleMessage, handleCallbackQuery, isAllowed, balanceMarkdown } from "./bot";
 import { clearDeliveredReminder } from "./redis";
 import type { TelegramUpdate, ReminderPayload } from "./types";
 
@@ -46,7 +46,8 @@ async function tgPost(path: string, body: unknown): Promise<globalThis.Response>
 }
 
 async function sendReminderMessage(chatId: number, text: string): Promise<void> {
-  let res = await tgPost("sendMessage", { chat_id: chatId, text, parse_mode: "Markdown" });
+  const balanced = balanceMarkdown(text);
+  let res = await tgPost("sendMessage", { chat_id: chatId, text: balanced, parse_mode: "Markdown" });
   if (!res.ok) {
     res = await tgPost("sendMessage", { chat_id: chatId, text });
     if (!res.ok) throw new Error(`Telegram xatosi: ${await res.text()}`);
@@ -57,6 +58,13 @@ async function sendReminderMessage(chatId: number, text: string): Promise<void> 
 
 app.post("/webhook", async (req: Request, res: Response) => {
   const secret = req.headers["x-telegram-bot-api-secret-token"];
+  const isProd = process.env.NODE_ENV === "production";
+
+  if (isProd && !process.env.TELEGRAM_WEBHOOK_SECRET) {
+    res.status(500).end("Webhook secret not configured in production");
+    return;
+  }
+
   if (
     process.env.TELEGRAM_WEBHOOK_SECRET &&
     secret !== process.env.TELEGRAM_WEBHOOK_SECRET
@@ -110,12 +118,18 @@ app.post("/api/remind", async (req: Request, res: Response) => {
     return;
   }
 
+  if (!isAllowed(userId)) {
+    console.warn(`[remind] Unauthorized reminder delivery request blocked for user: ${userId}`);
+    res.status(403).end("Forbidden");
+    return;
+  }
+
   // QStash har doim upstash-message-id headerini yuboradi — Redis'dan o'chirish uchun
   const qstashMsgId = req.headers["upstash-message-id"] as string | undefined;
 
   try {
     const safeText = text.replace(/[_*`[]/g, "\\$&");
-    await sendReminderMessage(userId, `⏰ *Eslatma:*\n${safeText}`);
+    await sendReminderMessage(userId, `⏰ *Eslatib o'taman:*\n${safeText}`);
     if (qstashMsgId) {
       clearDeliveredReminder(userId, qstashMsgId).catch((err) =>
         console.warn("[remind] Redis o'chirish xato:", err)
@@ -129,3 +143,4 @@ app.post("/api/remind", async (req: Request, res: Response) => {
 });
 
 export default app;
+

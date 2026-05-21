@@ -7,22 +7,41 @@ import { wavToOgg } from "./convert";
 
 const USERCLIENT_TIMEOUT_MS = 60_000;
 
-function makeClient(): TelegramClient {
-  const apiId = parseInt(process.env.TELEGRAM_API_ID ?? "0");
-  const apiHash = process.env.TELEGRAM_API_HASH ?? "";
-  const session = process.env.TELEGRAM_SESSION ?? "";
+let _client: TelegramClient | null = null;
 
-  if (!apiId || !apiHash)
-    throw new Error("TELEGRAM_API_ID yoki TELEGRAM_API_HASH sozlanmagan");
-  if (!session)
-    throw new Error("NOT_AUTHENTICATED");
+async function getClientInstance(): Promise<TelegramClient> {
+  if (!_client) {
+    const apiId = parseInt(process.env.TELEGRAM_API_ID ?? "0");
+    const apiHash = process.env.TELEGRAM_API_HASH ?? "";
+    const session = process.env.TELEGRAM_SESSION ?? "";
 
-  return new TelegramClient(new StringSession(session), apiId, apiHash, {
-    connectionRetries: 2,
-    retryDelay: 500,
-    autoReconnect: false,
-  });
+    if (!apiId || !apiHash)
+      throw new Error("TELEGRAM_API_ID yoki TELEGRAM_API_HASH sozlanmagan");
+    if (!session)
+      throw new Error("NOT_AUTHENTICATED");
+
+    _client = new TelegramClient(new StringSession(session), apiId, apiHash, {
+      connectionRetries: 5,
+      retryDelay: 1000,
+      autoReconnect: true,
+    });
+  }
+
+  if (!_client.connected) {
+    await _client.connect();
+  }
+  return _client;
 }
+
+// Graceful shutdown hooks to disconnect client session on process exit
+const gracefulShutdown = async (): Promise<void> => {
+  if (_client && _client.connected) {
+    console.log("🔌 Disconnecting Telegram client session...");
+    await _client.disconnect().catch((e) => console.error("TelegramClient disconnect xato:", e));
+  }
+};
+process.on("SIGINT", () => gracefulShutdown().finally(() => process.exit(0)));
+process.on("SIGTERM", () => gracefulShutdown().finally(() => process.exit(0)));
 
 function withDeadline<T>(promise: Promise<T>): Promise<T> {
   return Promise.race([
@@ -36,47 +55,30 @@ function withDeadline<T>(promise: Promise<T>): Promise<T> {
 // ─── Send message ─────────────────────────────────────────────────────────────
 
 export async function sendUserMessage(_uid: number, to: string, message: string): Promise<void> {
-  const client = makeClient();
-  let sendError: unknown;
-  try {
-    await withDeadline(
-      (async () => {
-        await client.connect();
-        await client.sendMessage(to, { message });
-      })()
-    );
-  } catch (err) {
-    sendError = err;
-  }
-  await client.disconnect().catch((e) => console.error("TelegramClient disconnect xatosi:", e));
-  if (sendError) throw sendError;
+  const client = await getClientInstance();
+  await withDeadline(
+    client.sendMessage(to, { message })
+  );
 }
 
 // ─── Send voice message ───────────────────────────────────────────────────────
 
 export async function sendUserVoiceMessage(_uid: number, to: string, audioBuffer: Buffer): Promise<void> {
-  const client = makeClient();
-  let sendError: unknown;
-  try {
-    await withDeadline(
-      (async () => {
-        await client.connect();
-        const oggBuffer = await wavToOgg(audioBuffer);
-        const file = new CustomFile("voice.ogg", oggBuffer.length, "", oggBuffer);
-        await client.sendFile(to, {
-          file,
-          voiceNote: true,
-          forceDocument: false,
-        });
-      })()
-    );
-  } catch (err) {
-    sendError = err;
-  }
-  await client.disconnect().catch((e) => console.error("TelegramClient disconnect xatosi:", e));
-  if (sendError) throw sendError;
+  const client = await getClientInstance();
+  await withDeadline(
+    (async () => {
+      const oggBuffer = await wavToOgg(audioBuffer);
+      const file = new CustomFile("voice.ogg", oggBuffer.length, "", oggBuffer);
+      await client.sendFile(to, {
+        file,
+        voiceNote: true,
+        forceDocument: false,
+      });
+    })()
+  );
 }
 
 export async function hasSession(_uid: number): Promise<boolean> {
   return !!(process.env.TELEGRAM_SESSION);
 }
+

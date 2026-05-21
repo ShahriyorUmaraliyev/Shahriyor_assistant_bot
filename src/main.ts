@@ -47,6 +47,10 @@ if (!process.env.ALLOWED_USER_IDS) {
   console.warn("⚠️  ALLOWED_USER_IDS sozlanmagan — hech kim botdan foydalana olmaydi!");
 }
 if (!process.env.TELEGRAM_WEBHOOK_SECRET) {
+  if (process.env.NODE_ENV === "production") {
+    console.error("❌ Xatolik: TELEGRAM_WEBHOOK_SECRET production muhitida sozlanishi majburiy!");
+    process.exit(1);
+  }
   console.warn("⚠️  TELEGRAM_WEBHOOK_SECRET sozlanmagan — /webhook endpoint himoyasiz!");
 }
 if (!process.env.GOOGLE_TRANSLATE_API_KEY) {

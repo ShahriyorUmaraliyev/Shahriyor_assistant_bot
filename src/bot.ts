@@ -13,10 +13,88 @@ import {
 } from "./translate";
 import { getReminders } from "./reminder";
 
-// ─── Markdown escape (MarkdownV1: * _ ` [ ) ──────────────────────────────────
+// ─── Markdown escape & balancing (MarkdownV1: * _ ` [ ) ───────────────────────
 
 function escapeMd(text: string): string {
   return text.replace(/[_*`[]/g, "\\$&");
+}
+
+export function balanceMarkdown(text: string): string {
+  let inBold = false;
+  let inItalic = false;
+  let inCode = false;
+  let inCodeBlock = false;
+
+  const chars = [...text];
+  let i = 0;
+  const result: string[] = [];
+
+  while (i < chars.length) {
+    const c = chars[i];
+
+    if (c === "\\") {
+      result.push(c);
+      if (i + 1 < chars.length) {
+        result.push(chars[i + 1]);
+        i += 2;
+      } else {
+        i += 1;
+      }
+      continue;
+    }
+
+    if (c === "`" && chars[i + 1] === "`" && chars[i + 2] === "`") {
+      if (inCode) {
+        result.push("```");
+        i += 3;
+        continue;
+      }
+      inCodeBlock = !inCodeBlock;
+      result.push("```");
+      i += 3;
+      continue;
+    }
+
+    if (c === "`") {
+      if (!inCodeBlock) {
+        inCode = !inCode;
+      }
+      result.push("`");
+      i += 1;
+      continue;
+    }
+
+    if (inCodeBlock || inCode) {
+      result.push(c);
+      i += 1;
+      continue;
+    }
+
+    if (c === "*") {
+      inBold = !inBold;
+      result.push("*");
+      i += 1;
+      continue;
+    }
+
+    if (c === "_") {
+      inItalic = !inItalic;
+      result.push("_");
+      i += 1;
+      continue;
+    }
+
+    result.push(c);
+    i += 1;
+  }
+
+  let finalStr = result.join("");
+  if (inCode) finalStr += "`";
+  if (inCodeBlock) finalStr += "\n```";
+  if (inBold) finalStr += "*";
+  if (inItalic) finalStr += "_";
+
+  return finalStr;
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -28,7 +106,7 @@ const allowedIds = new Set<number>(
     .filter((n) => !isNaN(n) && n > 0)
 );
 
-function isAllowed(userId: number): boolean {
+export function isAllowed(userId: number): boolean {
   return allowedIds.has(userId);
 }
 
@@ -92,7 +170,8 @@ export async function sendMessage(
   text: string,
   extra?: Record<string, unknown>
 ): Promise<void> {
-  const base = { chat_id: chatId, text, parse_mode: "Markdown", ...extra };
+  const balancedText = balanceMarkdown(text);
+  const base = { chat_id: chatId, text: balancedText, parse_mode: "Markdown", ...extra };
   let res = await tgFetch(`${TG}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
