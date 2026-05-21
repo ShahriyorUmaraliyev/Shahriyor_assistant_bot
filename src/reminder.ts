@@ -7,7 +7,12 @@ const APP_URL = process.env.APP_URL?.replace(/\/$/, "") ?? null;
 // Lazy singleton — har chaqiruvda yangi Client yaratmaslik
 let _qstash: Client | null = null;
 function getQStash(): Client {
-  if (!_qstash) _qstash = new Client({ token: process.env.QSTASH_TOKEN! });
+  if (!_qstash) {
+    _qstash = new Client({
+      token: process.env.QSTASH_TOKEN!,
+      baseUrl: process.env.QSTASH_URL,
+    });
+  }
   return _qstash;
 }
 

@@ -49,6 +49,7 @@ jobs:
           UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
           UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
           QSTASH_TOKEN: ${{ secrets.QSTASH_TOKEN }}
+          QSTASH_URL: ${{ secrets.QSTASH_URL }}
           QSTASH_CURRENT_SIGNING_KEY: ${{ secrets.QSTASH_CURRENT_SIGNING_KEY }}
           QSTASH_NEXT_SIGNING_KEY: ${{ secrets.QSTASH_NEXT_SIGNING_KEY }}
           OPENWEATHERMAP_API_KEY: ${{ secrets.OPENWEATHERMAP_API_KEY }}
@@ -99,6 +100,7 @@ jobs:
       - name: Register QStash cron schedule
         env:
           QSTASH_TOKEN: ${{ secrets.QSTASH_TOKEN }}
+          QSTASH_URL: ${{ secrets.QSTASH_URL }}
           ALLOWED_USER_IDS: ${{ secrets.ALLOWED_USER_IDS }}
           APP_URL: ${{ steps.deploy.outputs.url }}
         run: node scripts/register-cron.mjs

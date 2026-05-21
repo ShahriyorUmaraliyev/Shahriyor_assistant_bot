@@ -7,6 +7,7 @@
 const token = process.env.QSTASH_TOKEN;
 const base = process.env.APP_URL?.replace(/\/$/, "") ?? null;
 const userIdsStr = process.env.ALLOWED_USER_IDS ?? "";
+const qstashUrlBase = (process.env.QSTASH_URL || "https://qstash.upstash.io").replace(/\/$/, "");
 
 if (!token || !base || !userIdsStr) {
   console.warn(
@@ -27,11 +28,12 @@ const scheduleId = "daily-ai-news-shahriyor";
 
 console.log(`ℹ️ Daily news destination: ${destination}`);
 console.log(`ℹ️ Target User ID: ${targetUserId}`);
+console.log(`ℹ️ QStash Base URL: ${qstashUrlBase}`);
 
 try {
   // Avval eski cron jadvali bo'lsa uni o'chiramiz, shunda yangi sozlamalar bilan toza yoziladi
   try {
-    const delRes = await fetch(`https://qstash.upstash.io/v2/schedules/${scheduleId}`, {
+    const delRes = await fetch(`${qstashUrlBase}/v2/schedules/${scheduleId}`, {
       method: "DELETE",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -45,7 +47,7 @@ try {
   }
 
   // Yangi cron schedule yaratamiz
-  const createRes = await fetch(`https://qstash.upstash.io/v2/schedules/${destination}`, {
+  const createRes = await fetch(`${qstashUrlBase}/v2/schedules/${destination}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
