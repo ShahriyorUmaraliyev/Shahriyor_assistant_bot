@@ -43,6 +43,19 @@ export function balanceMarkdown(text: string): string {
       continue;
     }
 
+    // Skip formatting inside link URLs to prevent mangling underscores or other formatting chars
+    if (c === "(" && chars[i + 1] === "h" && chars[i + 2] === "t" && chars[i + 3] === "t" && chars[i + 4] === "p") {
+      while (i < chars.length) {
+        const linkChar = chars[i];
+        result.push(linkChar);
+        i += 1;
+        if (linkChar === ")") {
+          break;
+        }
+      }
+      continue;
+    }
+
     if (c === "`" && chars[i + 1] === "`" && chars[i + 2] === "`") {
       if (inCode) {
         result.push("```");

@@ -594,6 +594,15 @@ QIDIRUV FORMATI — QAT'IY QOIDALAR:
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function processGroundingLinks(text: string, response: any): string {
+  const escapeUri = (uri: string) =>
+    uri
+      .replace(/_/g, "%5F")
+      .replace(/\*/g, "%2A")
+      .replace(/\(/g, "%28")
+      .replace(/\)/g, "%29")
+      .replace(/\[/g, "%5B")
+      .replace(/\]/g, "%5D");
+
   const meta = response.candidates?.[0]?.groundingMetadata;
   const chunks: Array<{ web?: { uri?: string; title?: string } }> = meta?.groundingChunks ?? [];
   const supports: Array<{
@@ -628,7 +637,7 @@ function processGroundingLinks(text: string, response: any): string {
       .filter((w, i, a) => a.findIndex((x) => x.uri === w.uri) === i)
       .slice(0, 5)
       .map((w) => {
-        const uri = w.uri.replace(/_/g, "%5F").replace(/\)/g, "%29");
+        const uri = escapeUri(w.uri);
         return `• [${escapeMd(w.title)}](${uri})`;
       });
     return all.length ? `${text}\n\n📎 *Manbalar:*\n${all.join("\n")}` : text;
@@ -655,8 +664,8 @@ function processGroundingLinks(text: string, response: any): string {
     if (!unique.length) return para;
     // Birinchi moslashgan linkni ishlatamiz
     usedUris.add(unique[0].uri);
-    const safeUri = unique[0].uri.replace(/_/g, "%5F").replace(/\)/g, "%29");
-    return `${para}\n[Havola ↗](${safeUri})`;
+    const safeUri = escapeUri(unique[0].uri);
+    return `${para} [Havola ↗](${safeUri})`;
   });
 
   // Ishlatilmagan linklar pastda
@@ -665,7 +674,7 @@ function processGroundingLinks(text: string, response: any): string {
     .filter((s, i, a) => a.findIndex((x) => x.uri === s.uri) === i)
     .slice(0, 5)
     .map((s) => {
-      const uri = s.uri.replace(/_/g, "%5F").replace(/\)/g, "%29");
+      const uri = escapeUri(s.uri);
       return `• [${escapeMd(s.title)}](${uri})`;
     });
 
