@@ -665,7 +665,7 @@ function processGroundingLinks(text: string, response: any): string {
     // Birinchi moslashgan linkni ishlatamiz
     usedUris.add(unique[0].uri);
     const safeUri = escapeUri(unique[0].uri);
-    return `${para} [Havola ↗](${safeUri})`;
+    return `${para}\n\n🔗 *Batafsil:* [Havola ↗](${safeUri})`;
   });
 
   // Ishlatilmagan linklar pastda
