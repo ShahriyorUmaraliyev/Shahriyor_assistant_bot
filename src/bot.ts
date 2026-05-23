@@ -183,7 +183,11 @@ export async function sendMessage(
   text: string,
   extra?: Record<string, unknown>
 ): Promise<void> {
-  const balancedText = balanceMarkdown(text);
+  let safeText = text;
+  if (safeText.length > 4000) {
+    safeText = safeText.slice(0, 4000) + "\n\n... [Xabar uzunligi sababli qisqartirildi]";
+  }
+  const balancedText = balanceMarkdown(safeText);
   const base = { chat_id: chatId, text: balancedText, parse_mode: "Markdown", ...extra };
   let res = await tgFetch(`${TG}/sendMessage`, {
     method: "POST",
@@ -192,14 +196,16 @@ export async function sendMessage(
   });
   if (!res.ok) {
     // parse_mode xatosi bo'lsa — markdown'siz qayta urinish
-    const plain = { chat_id: chatId, text, ...extra };
+    const plain = { chat_id: chatId, text: safeText, ...extra };
     res = await tgFetch(`${TG}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(plain),
     });
     if (!res.ok) {
-      console.error(`Telegram xatosi: ${await res.text()}`);
+      const errText = await res.text();
+      console.error(`Telegram xatosi: ${errText}`);
+      throw new Error(`Telegram sendMessage failed: ${errText}`);
     }
   }
 }
