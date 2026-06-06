@@ -10,7 +10,12 @@ interface CbuRate {
 }
 
 const CBU_URL = "https://cbu.uz/uz/arkhiv-kursov-valyut/json";
-const TIMEOUT_MS = 8_000;
+const TIMEOUT_MS = 10_000;
+// Ba'zi serverlar Node'ning standart User-Agent'ini rad etadi — browser UA beramiz
+const CBU_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (compatible; ShahriyorAssist/1.0)",
+  Accept: "application/json",
+};
 
 // Keng tarqalgan nomlarni ISO kodga moslashtirish
 const ALIAS: Record<string, string> = {
@@ -32,15 +37,16 @@ export async function getRateValue(code: string): Promise<number | null> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(`${CBU_URL}/${normalizeCode(code)}/`, { signal: ctrl.signal });
-    if (!res.ok) return null;
+    const res = await fetch(`${CBU_URL}/${normalizeCode(code)}/`, { signal: ctrl.signal, headers: CBU_HEADERS });
+    if (!res.ok) { console.warn(`[currency] getRateValue HTTP ${res.status}`); return null; }
     const data = (await res.json()) as CbuRate[];
     const item = data?.[0];
     if (!item) return null;
     const rate = parseFloat(item.Rate);
     const nominal = parseInt(item.Nominal, 10) || 1;
     return isFinite(rate) ? rate / nominal : null;
-  } catch {
+  } catch (err) {
+    console.warn("[currency] getRateValue xato:", (err as Error).message);
     return null;
   } finally {
     clearTimeout(timer);
@@ -55,7 +61,7 @@ export async function getCurrencyRate(currency: string, amount = 1): Promise<str
 
   let res: Response;
   try {
-    res = await fetch(`${CBU_URL}/${code}/`, { signal: ctrl.signal });
+    res = await fetch(`${CBU_URL}/${code}/`, { signal: ctrl.signal, headers: CBU_HEADERS });
   } catch (err) {
     if ((err as Error).name === "AbortError") return "Valyuta kursi olishda vaqt tugadi (8s). Qayta urinib ko'ring.";
     return "Markaziy bank xizmatiga ulanishda tarmoq xatosi. Qayta urinib ko'ring.";

@@ -145,7 +145,9 @@ QOIDALAR:
 - MUHIM: "ulanganmi", "imkon bor" kabi savollarni hech qachon berma — tool ni chaqir, natijani ko'r
 - MUHIM: tool avval xato bergan bo'lsa ham — QAYTA chaqir, hech qachon "ishlamaydi" deb o'z-o'zidan javob berma
 - MUHIM: eslatmalar (set_reminder) FAQAT Shahriyorning o'ziga keladi. Boshqalarga xabar yuborish uchun send_message yoki send_voice_message ishlatiladi.
-- AI token sarfi / xarajat hisoboti → get_token_usage ("qancha token/pul sarfladim", "AI xarajati")
+- biznes XARAJAT hisoboti ("xarajatlarim", "bugungi/shu oygi xarajat", "qancha sarfladim", "harajatlar qanday") → read_sheet("Xarajatlar!A:E") bilan o'qib, kerakli davr bo'yicha summalarni QO'SHIB ber. Bu AI token EMAS!
+- mahsulot/sotuv hisoboti ("mahsulotlarim", "nima sotdim") → read_sheet("Mahsulotlar!A:E")
+- FAQAT AI token sarfi ("token", "AI xarajati", "API narxi") → get_token_usage
 - valyuta kursi / so'mga aylantirish → get_currency_rate (dollar, evro, rubl va h.k.)
 - foydalanuvchi havola (http/https URL) yuborsa yoki "shu linkni qisqartir" desa → summarize_url ni DARHOL chaqir
 - taqvim ko'rish/qo'shish → get_calendar / add_calendar_event | end yo'q bo'lsa: start + 1 soat
@@ -469,9 +471,11 @@ export const summarizeUrlTool = {
 export const getTokenUsageTool = {
   name: "get_token_usage",
   description:
-    "Gemini AI token sarfi va taxminiy xarajat hisobotini ko'rsatish (bugun yoki shu oy). " +
-    "\"Bu oy qancha token sarfladim\", \"AI xarajati qancha\", \"token hisoboti\", " +
-    "\"qancha pul ketdi\" kabi so'rovlarda chaqiring.",
+    "FAQAT Gemini AI token sarfi hisobotini ko'rsatish (bugun yoki shu oy). " +
+    "Faqat \"token\", \"AI xarajati\", \"API narxi\", \"AI qancha tokenladi\" kabi " +
+    "ANIQ token/AI so'rovlarida chaqiring. " +
+    "DIQQAT: oddiy \"xarajat\", \"harajatlar\", \"qancha sarfladim\" (pul/biznes) so'rovlari " +
+    "BU EMAS — ular Google Sheets 'Xarajatlar' jadvali (read_sheet).",
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
