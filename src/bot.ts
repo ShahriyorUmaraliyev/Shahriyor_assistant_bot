@@ -4,8 +4,9 @@ import {
   getTranslateLang, setTranslateLang, getTranslatePending, setTranslatePending, clearTranslatePending,
 } from "./redis";
 import { getMemory } from "./memory";
-import { generateReply, generateWithSearch, classifyGeminiError } from "./gemini";
+import { generateReply, generateReplyWithImage, generateWithSearch, classifyGeminiError } from "./gemini";
 import { downloadVoice, transcribeVoice, textToSpeech } from "./audio";
+import { downloadTelegramPhoto } from "./vision";
 import { hasSession } from "./userclient";
 import {
   translateText, translateErrorMessage, langListText,
@@ -185,7 +186,7 @@ export async function sendMessage(
 ): Promise<void> {
   let safeText = text;
   if (safeText.length > 4000) {
-    safeText = safeText.slice(0, 4000) + "\n\n... [Xabar uzunligi sababli qisqartirildi]";
+    safeText = safeText.slice(0, 4000) + "\n\n… (xabar uzunligi sababli qisqartirildi)";
   }
   const balancedText = balanceMarkdown(safeText);
   const base = { chat_id: chatId, text: balancedText, parse_mode: "Markdown", ...extra };
@@ -206,6 +207,42 @@ export async function sendMessage(
       const errText = await res.text();
       console.error(`Telegram xatosi: ${errText}`);
       throw new Error(`Telegram sendMessage failed: ${errText}`);
+    }
+  }
+}
+
+// HTML rejimida yuborish — grounding/qidiruv natijalari uchun. Uzun Google URL'lari
+// MarkdownV1 da buziladi, HTML <a href> da esa barqaror "Havola" linki bo'lib chiqadi.
+export async function sendMessageHtml(
+  chatId: number,
+  html: string,
+  extra?: Record<string, unknown>
+): Promise<void> {
+  let safe = html;
+  if (safe.length > 4000) {
+    safe = safe.slice(0, 4000) + "\n\n… (xabar qisqartirildi)";
+  }
+  const base = { chat_id: chatId, text: safe, parse_mode: "HTML", disable_web_page_preview: true, ...extra };
+  let res = await tgFetch(`${TG}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(base),
+  });
+  if (!res.ok) {
+    // HTML parse xatosi — teglarni tozalab oddiy matn sifatida qayta urinish
+    const plain = safe
+      .replace(/<a href="[^"]*">(.*?)<\/a>/g, "$1")
+      .replace(/<\/?[^>]+>/g, "");
+    const plainBody = { chat_id: chatId, text: plain, disable_web_page_preview: true, ...extra };
+    res = await tgFetch(`${TG}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(plainBody),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`Telegram HTML xatosi: ${errText}`);
+      throw new Error(`Telegram sendMessageHtml failed: ${errText}`);
     }
   }
 }
@@ -305,9 +342,10 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
   const rawText = message.text?.trim();
   const text = rawText?.replace(/^[\p{Emoji}\s]+\//u, "/") ?? rawText;
   const voice = message.voice;
+  const photo = message.photo;
 
-  if (!text && !voice) {
-    await sendMessage(chatId, "Bunday turni tushunmayman. Hozircha faqat matn va ovozli xabarlarga javob bera olaman.");
+  if (!text && !voice && !(photo && photo.length)) {
+    await sendMessage(chatId, "Bunday turni tushunmayman. Hozircha matn, ovozli xabar va rasmlarga javob bera olaman.");
     return;
   }
 
@@ -403,8 +441,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       { role: "model", text: reply, timestamp: Date.now() },
     ]).catch(console.error);
 
-    // Search natijalari (link, markdown, citation) ovoz sifatida mantiqsiz — har doim matn
-    await deliverReply(chatId, reply, "text", userId);
+    // Search natijalari HTML formatida (grounding linklari barqaror) — har doim matn
+    await sendMessageHtml(chatId, reply);
     return;
   }
 
@@ -529,9 +567,10 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       const lang = TRANSLATE_LANGS[targetLangCode];
       const preview = inputText.length > 120 ? inputText.slice(0, 120) + "…" : inputText;
       await setTranslateLang(userId, targetLangCode);
+      await clearTranslatePending(userId);
       await sendMessage(
         chatId,
-        `${lang.flag} *${lang.name}:*\n${translated}\n\n_Asl:_ ${preview}`,
+        `${lang.flag} *${lang.name}:*\n${escapeMd(translated)}\n\n_Asl:_ ${escapeMd(preview)}`,
         { reply_markup: CHANGE_LANG_KEYBOARD }
       );
       return;
@@ -554,6 +593,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       }
       const lang = TRANSLATE_LANGS[lastLang];
       const preview = inputText.length > 120 ? inputText.slice(0, 120) + "…" : inputText;
+      await clearTranslatePending(userId);
       await sendMessage(
         chatId,
         `${lang.flag} *${lang.name}:*\n${escapeMd(translated)}\n\n_Asl:_ ${escapeMd(preview)}`,
@@ -591,6 +631,54 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
     getMemory(userId),
     getUserMode(userId),
   ]);
+
+  // ── Rasm (INPUT) ────────────────────────────────────────────────────────────
+
+  if (photo && photo.length) {
+    // Telegram suratlarni o'sish tartibida beradi — eng kattasini olamiz
+    const largest = photo[photo.length - 1];
+    let image: { buffer: Buffer; mimeType: string };
+    try {
+      image = await downloadTelegramPhoto(largest.file_id, largest.file_size);
+    } catch (err) {
+      clearInterval(typingInterval);
+      console.error("Rasm yuklab olish xatosi:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("IMAGE_TOO_LARGE"))
+        await sendMessage(chatId, "📦 Rasm hajmi juda katta (15 MB dan oshmasin).");
+      else if (msg.includes("IMAGE_DOWNLOAD_TIMEOUT"))
+        await sendMessage(chatId, "⏱ Rasmni yuklab olishda vaqt tugadi. Qayta yuboring.");
+      else
+        await sendMessage(chatId, "❌ Rasmni yuklab bo'lmadi. Qayta yuboring.");
+      return;
+    }
+
+    let reply: string;
+    try {
+      reply = await generateReplyWithImage(
+        image.buffer.toString("base64"),
+        image.mimeType,
+        message.caption ?? "",
+        history, memory, userId, mode
+      );
+    } catch (err) {
+      clearInterval(typingInterval);
+      console.error("generateReplyWithImage xatosi:", err);
+      await sendMessage(chatId, geminiErrorMessage(err));
+      return;
+    }
+
+    clearInterval(typingInterval);
+    const histNote = message.caption ? `🖼 [rasm] ${message.caption}` : "🖼 [rasm]";
+    await saveHistory(userId, [
+      ...history,
+      { role: "user", text: histNote, timestamp: Date.now() },
+      { role: "model", text: reply, timestamp: Date.now() },
+    ]).catch(console.error);
+
+    await deliverReply(chatId, reply, mode, userId);
+    return;
+  }
 
   // ── Ovozli xabar (INPUT) ───────────────────────────────────────────────────
 
@@ -644,8 +732,7 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
   // ── Matnli xabar ──────────────────────────────────────────────────────────
 
   if (text) {
-    // Gemini (ayniqsa tool call bilan) 10-20 sek ishlaydi — typing har 4s yangilanadi
-    const typingTimer = setInterval(() => sendTyping(chatId).catch(() => {}), 4_000);
+    // typing animatsiyasi yuqorida boshlangan typingInterval orqali har 4s yangilanadi
     let reply: string;
     try {
       reply = await generateReply(text, history, memory, userId, mode);
@@ -655,10 +742,9 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       await sendMessage(chatId, geminiErrorMessage(err));
       return;
     } finally {
-      clearInterval(typingTimer);
+      clearInterval(typingInterval);
     }
 
-    clearInterval(typingInterval);
     await saveHistory(userId, [
       ...history,
       { role: "user", text, timestamp: Date.now() },
@@ -780,6 +866,7 @@ export async function handleCallbackQuery(query: TelegramCallbackQuery): Promise
     }
 
     await setTranslateLang(userId, langCode);
+    await clearTranslatePending(userId);
 
     const preview = pending.length > 120 ? pending.slice(0, 120) + "…" : pending;
     await sendMessage(
@@ -800,7 +887,7 @@ async function deliverReply(
   userId?: number
 ): Promise<void> {
   if (text.length > 4000) {
-    text = text.slice(0, 4000) + "\n\n... [Xabar uzunligi sababli qisqartirildi]";
+    text = text.slice(0, 4000) + "\n\n… (xabar uzunligi sababli qisqartirildi)";
   }
 
   if (mode !== "voice") {

@@ -7,7 +7,14 @@ const memoryKey = (userId: number) => `memory:${userId}`;
 export async function getMemory(userId: number): Promise<UserMemory> {
   const stored = await getRedis().get<UserMemory>(memoryKey(userId));
   if (!stored) return { ...EMPTY_MEMORY };
-  return { ...stored, preferences: stored.preferences ?? [] };
+  // Barcha maydonlarni normallashtirish — eski/qisman yozuvlarda biror maydon
+  // yo'q bo'lsa patchMemory (.push / [name]=) TypeError bermasligi uchun.
+  return {
+    contacts: stored.contacts ?? {},
+    products: stored.products ?? {},
+    notes: stored.notes ?? [],
+    preferences: stored.preferences ?? [],
+  };
 }
 
 export async function saveMemory(

@@ -6,6 +6,8 @@ import { sendUserMessage, sendUserVoiceMessage } from "./userclient";
 import { getCalendarEvents, addCalendarEvent } from "./gcalendar";
 import { readSheet, appendSheetRow, updateSheetCell } from "./gsheets";
 import { getCurrentWeather, getForecastWeather } from "./weather";
+import { getCurrencyRate, getRateValue } from "./currency";
+import { recordTokenUsage, getTokenUsage } from "./redis";
 
 // Gemini API client — lazy singleton (audio.ts ham shu instansni ishlatadi)
 let _genAI: GoogleGenerativeAI | null = null;
@@ -22,6 +24,13 @@ function logTokenUsage(label: string, response: { usageMetadata?: { promptTokenC
     (u.thoughtsTokenCount ? ` thinking=${u.thoughtsTokenCount}` : "") +
     ` total=${u.totalTokenCount ?? 0}`
   );
+  // Redis'da yig'ib boramiz — get_token_usage tool hisobot beradi (fire-and-forget)
+  recordTokenUsage({
+    prompt: u.promptTokenCount ?? 0,
+    output: u.candidatesTokenCount ?? 0,
+    thinking: u.thoughtsTokenCount ?? 0,
+    total: u.totalTokenCount ?? 0,
+  }).catch((e) => console.warn("[tokens] saqlash xato:", e));
 }
 
 // Cloud Run timeout 300s — Gemini ga 50s beramiz (ovozli xabar pipeline uchun yetarli)
@@ -86,12 +95,6 @@ export async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T
   throw lastErr;
 }
 
-// ─── Markdown escape (MarkdownV1: * _ ` [ ) ──────────────────────────────────
-
-function escapeMd(text: string): string {
-  return text.replace(/[_*`[]/g, "\\$&");
-}
-
 // ─── System Prompt ────────────────────────────────────────────────────────────
 
 function compactMemory(memory: UserMemory): string {
@@ -132,7 +135,7 @@ FARQ (MUHIM):
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
 TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
 ${modeNote}
-QOBILIYAT: Matn/ovoz qabul + yuborish. Ob-havo, eslatmalar, kontaktlar, xabar yuborish, Google Calendar (taqvim), Google Sheets (jadval). Real vaqt yangiliklari uchun /search.
+QOBILIYAT: Matn/ovoz qabul + yuborish. Ob-havo, eslatmalar, kontaktlar, xabar yuborish, Google Calendar (taqvim), Google Sheets (jadval), valyuta kursi (so'mga aylantirish), havola (URL) xulosasi. Real vaqt yangiliklari uchun /search.
 XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
@@ -142,6 +145,9 @@ QOIDALAR:
 - MUHIM: "ulanganmi", "imkon bor" kabi savollarni hech qachon berma — tool ni chaqir, natijani ko'r
 - MUHIM: tool avval xato bergan bo'lsa ham — QAYTA chaqir, hech qachon "ishlamaydi" deb o'z-o'zidan javob berma
 - MUHIM: eslatmalar (set_reminder) FAQAT Shahriyorning o'ziga keladi. Boshqalarga xabar yuborish uchun send_message yoki send_voice_message ishlatiladi.
+- AI token sarfi / xarajat hisoboti → get_token_usage ("qancha token/pul sarfladim", "AI xarajati")
+- valyuta kursi / so'mga aylantirish → get_currency_rate (dollar, evro, rubl va h.k.)
+- foydalanuvchi havola (http/https URL) yuborsa yoki "shu linkni qisqartir" desa → summarize_url ni DARHOL chaqir
 - taqvim ko'rish/qo'shish → get_calendar / add_calendar_event | end yo'q bo'lsa: start + 1 soat
 - jadval o'qish → read_sheet | jadvalga yozish → append_sheet | katak yangilash → update_sheet_cell
 - AVTOMATIK JADVAL QOIDALARI (foydalanuvchi "yoz", "saqlа" demasa ham):
@@ -420,6 +426,63 @@ export const updateSheetTool = {
   },
 };
 
+export const getCurrencyTool = {
+  name: "get_currency_rate",
+  description:
+    "O'zbekiston Markaziy banki bo'yicha valyuta kursini olish va so'mga aylantirish. " +
+    "\"Bugungi dollar kursi\", \"1000 dollar necha so'm\", \"evro qancha\", \"500 rubl so'mda\" " +
+    "kabi so'rovlarda DARHOL chaqiring.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      currency: {
+        type: SchemaType.STRING,
+        description: 'Valyuta kodi yoki nomi. Misol: "USD", "EUR", "RUB", "dollar", "evro", "rubl"',
+      },
+      amount: {
+        type: SchemaType.NUMBER,
+        description: "Aylantiriladigan miqdor. Faqat kurs so'ralsa 1 qoldiring. Misol: 1000",
+      },
+    },
+    required: ["currency"],
+  },
+};
+
+export const summarizeUrlTool = {
+  name: "summarize_url",
+  description:
+    "Veb-sahifa (havola/URL) mazmunini o'qib, qisqacha xulosa qilish. " +
+    "Foydalanuvchi havola (http/https bilan) yuborsa YOKI \"bu maqolani qisqartir\", " +
+    "\"shu linkda nima yozilgan\" desa DARHOL chaqiring.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      url: {
+        type: SchemaType.STRING,
+        description: "To'liq havola. Misol: https://example.com/article",
+      },
+    },
+    required: ["url"],
+  },
+};
+
+export const getTokenUsageTool = {
+  name: "get_token_usage",
+  description:
+    "Gemini AI token sarfi va taxminiy xarajat hisobotini ko'rsatish (bugun yoki shu oy). " +
+    "\"Bu oy qancha token sarfladim\", \"AI xarajati qancha\", \"token hisoboti\", " +
+    "\"qancha pul ketdi\" kabi so'rovlarda chaqiring.",
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      period: {
+        type: SchemaType.STRING,
+        description: '"day" (bugun) yoki "month" (shu oy). Standart: month.',
+      },
+    },
+  },
+};
+
 // ─── Function Call Handler ────────────────────────────────────────────────────
 
 export async function handleTool(
@@ -451,19 +514,20 @@ export async function handleTool(
   if (name === "send_message") {
     const { contact, message } = args as { contact: string; message: string };
     let recipient = contact;
+    let recipientName: string | undefined; // import uchun kontakt ismi
     // Telefon/username bo'lmasa — xotiradan qidirish
     if (!contact.startsWith("+") && !contact.startsWith("@")) {
       const memory = await getMemory(userId);
       const lower = contact.toLowerCase();
       for (const [cname, data] of Object.entries(memory.contacts)) {
         if (cname.toLowerCase() === lower || (lower.length >= 3 && cname.toLowerCase().includes(lower))) {
-          if (data.phone) { recipient = data.phone; break; }
+          if (data.phone) { recipient = data.phone; recipientName = cname; break; }
         }
       }
       if (recipient === contact)
         return `"${contact}" kontaktining telefon raqami xotirada topilmadi. Avval kontakt raqamini saqlang.`;
     }
-    await sendUserMessage(userId, recipient, message);
+    await sendUserMessage(userId, recipient, message, recipientName);
     return `Xabar yuborildi.`;
   }
   if (name === "list_reminders") {
@@ -537,16 +601,54 @@ export async function handleTool(
     const { range, value } = args as { range: string; value: string };
     return await updateSheetCell(range, value);
   }
+  if (name === "get_currency_rate") {
+    const { currency, amount } = args as { currency: string; amount?: number };
+    return await getCurrencyRate(currency, typeof amount === "number" ? amount : 1);
+  }
+  if (name === "summarize_url") {
+    const { url } = args as { url: string };
+    const { summarizeUrl } = await import("./websummary");
+    return await summarizeUrl(url);
+  }
+  if (name === "get_token_usage") {
+    const period = args.period === "day" ? "day" : "month";
+    const u = await getTokenUsage(period);
+    if (!u.calls) return `Bu ${period === "day" ? "kun" : "oy"} uchun hali AI sarfi qayd etilmagan.`;
+
+    // Gemini 2.5 Flash taxminiy narxi (USD / 1M token). Env orqali yangilash mumkin.
+    const PRICE_IN = Number(process.env.GEMINI_PRICE_IN ?? 0.30);
+    const PRICE_OUT = Number(process.env.GEMINI_PRICE_OUT ?? 2.50);
+    const costUsd =
+      (u.prompt / 1_000_000) * PRICE_IN +
+      ((u.output + u.thinking) / 1_000_000) * PRICE_OUT;
+
+    const usdRate = await getRateValue("USD"); // 1 USD necha so'm
+    const fmtUsd = `$${costUsd.toFixed(costUsd < 0.01 ? 5 : 4)}`;
+    const fmtSom = usdRate
+      ? `${Math.round(costUsd * usdRate).toLocaleString("ru-RU")} so'm`
+      : "kurs olinmadi";
+
+    return JSON.stringify({
+      davr: period === "day" ? "Bugun" : "Shu oy",
+      so_rovlar: u.calls,
+      kirish_token: u.prompt.toLocaleString("ru-RU"),
+      chiqish_token: (u.output + u.thinking).toLocaleString("ru-RU"),
+      jami_token: u.total.toLocaleString("ru-RU"),
+      taxminiy_xarajat: `${fmtUsd} (~${fmtSom})`,
+      eslatma: "Narx taxminiy — Gemini Flash standart tarifiga asoslangan.",
+    });
+  }
   if (name === "send_voice_message") {
     const { contact, message } = args as { contact: string; message: string };
     let recipient = contact;
+    let recipientName: string | undefined; // import uchun kontakt ismi
     // Telefon/username bo'lmasa — xotiradan qidirish
     if (!contact.startsWith("+") && !contact.startsWith("@")) {
       const memory = await getMemory(userId);
       const lower = contact.toLowerCase();
       for (const [cname, data] of Object.entries(memory.contacts)) {
         if (cname.toLowerCase() === lower || (lower.length >= 3 && cname.toLowerCase().includes(lower))) {
-          if (data.phone) { recipient = data.phone; break; }
+          if (data.phone) { recipient = data.phone; recipientName = cname; break; }
         }
       }
       if (recipient === contact)
@@ -556,7 +658,7 @@ export async function handleTool(
     const safeMsg = message.slice(0, 800);
     try {
       const audioBuffer = await textToSpeech(safeMsg);
-      await sendUserVoiceMessage(userId, recipient, audioBuffer);
+      await sendUserVoiceMessage(userId, recipient, audioBuffer, recipientName);
       return `Ovozli xabar yuborildi: "${safeMsg.slice(0, 50)}${safeMsg.length > 50 ? "…" : ""}"`;
     } catch (err) {
       const msg = (err as Error).message ?? String(err);
@@ -592,17 +694,28 @@ QIDIRUV FORMATI — QAT'IY QOIDALAR:
 5. Linklar sistema tomonidan AVTOMATIK qo'shiladi — sen hech qachon link yozma.`
 }
 
+// HTML parse mode uchun escaping — Telegram MarkdownV1 uzun grounding URL'larni
+// ishonchsiz parse qiladi (xom URL chiqib qoladi). HTML <a href> esa mutlaqo barqaror.
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Model matnidagi yengil markdown (*qalin*, `kod`) ni HTML'ga aylantirish.
+// Avval HTML-escape, keyin emphasis — shunda <b> teglari saqlanadi.
+function mdLiteToHtml(text: string): string {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/\*(.+?)\*/g, "<b>$1</b>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+
+// HTML havola — href ichida faqat & ni escape qilish kifoya (URL allaqachon kodlangan).
+function htmlLink(uri: string, label: string): string {
+  return `<a href="${escapeHtml(uri)}">${escapeHtml(label)}</a>`;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function processGroundingLinks(text: string, response: any): string {
-  const escapeUri = (uri: string) =>
-    uri
-      .replace(/_/g, "%5F")
-      .replace(/\*/g, "%2A")
-      .replace(/\(/g, "%28")
-      .replace(/\)/g, "%29")
-      .replace(/\[/g, "%5B")
-      .replace(/\]/g, "%5D");
-
   const meta = response.candidates?.[0]?.groundingMetadata;
   const chunks: Array<{ web?: { uri?: string; title?: string } }> = meta?.groundingChunks ?? [];
   const supports: Array<{
@@ -610,7 +723,8 @@ function processGroundingLinks(text: string, response: any): string {
     segment?: { endIndex?: number };
   }> = meta?.groundingSupports ?? [];
 
-  if (!chunks.length) return text;
+  // Chiqish HTML formatida — grounding bo'lmasa ham matnni HTML'ga aylantiramiz
+  if (!chunks.length) return mdLiteToHtml(text);
 
   const paragraphs = text.split(/\n{2,}/).filter((p) => p.trim());
 
@@ -636,11 +750,9 @@ function processGroundingLinks(text: string, response: any): string {
       .filter((w): w is { uri: string; title: string } => !!(w?.uri && w?.title))
       .filter((w, i, a) => a.findIndex((x) => x.uri === w.uri) === i)
       .slice(0, 5)
-      .map((w) => {
-        const uri = escapeUri(w.uri);
-        return `• [${escapeMd(w.title)}](${uri})`;
-      });
-    return all.length ? `${text}\n\n📎 *Manbalar:*\n${all.join("\n")}` : text;
+      .map((w) => `• ${htmlLink(w.uri, w.title)}`);
+    const htmlBody = mdLiteToHtml(text);
+    return all.length ? `${htmlBody}\n\n📎 <b>Manbalar:</b>\n${all.join("\n")}` : htmlBody;
   }
 
   // Har bir paragrafning taxminiy char offset ini hisoblash
@@ -661,11 +773,11 @@ function processGroundingLinks(text: string, response: any): string {
       (s) => s.endIndex > start && s.endIndex <= end + 50
     );
     const unique = matched.filter((s) => !usedUris.has(s.uri));
-    if (!unique.length) return para;
-    // Birinchi moslashgan linkni ishlatamiz
+    const htmlPara = mdLiteToHtml(para);
+    if (!unique.length) return htmlPara;
+    // Birinchi moslashgan linkni o'sha ma'lumotdan keyin "Havola" ko'rinishida joylaymiz
     usedUris.add(unique[0].uri);
-    const safeUri = escapeUri(unique[0].uri);
-    return `${para}\n\n🔗 *Batafsil:* [Havola ↗](${safeUri})`;
+    return `${htmlPara}\n🔗 <b>Batafsil:</b> ${htmlLink(unique[0].uri, "Havola ↗")}`;
   });
 
   // Ishlatilmagan linklar pastda
@@ -673,13 +785,10 @@ function processGroundingLinks(text: string, response: any): string {
     .filter((s) => !usedUris.has(s.uri))
     .filter((s, i, a) => a.findIndex((x) => x.uri === s.uri) === i)
     .slice(0, 5)
-    .map((s) => {
-      const uri = escapeUri(s.uri);
-      return `• [${escapeMd(s.title)}](${uri})`;
-    });
+    .map((s) => `• ${htmlLink(s.uri, s.title)}`);
 
   const body = result2.join("\n\n");
-  return unused.length ? `${body}\n\n📎 *Qo'shimcha manbalar:*\n${unused.join("\n")}` : body;
+  return unused.length ? `${body}\n\n📎 <b>Qo'shimcha manbalar:</b>\n${unused.join("\n")}` : body;
 }
 
 export async function generateWithSearch(
@@ -756,18 +865,15 @@ Qoidalar:
   return processGroundingLinks(text, result.response);
 }
 
-export async function generateReply(
-  userText: string,
-  history: ChatMessage[],
-  memory: UserMemory,
-  userId: number,
-  mode: "text" | "voice" = "text"
-): Promise<string> {
-  const safeText = userText.length > 2000 ? userText.slice(0, 2000) + "…" : userText;
+// Matn yo'li uchun standart model. Rasm o'qish alohida model bilan (VISION_MODEL).
+const TEXT_MODEL = "gemini-2.5-flash";
+// Rasm o'qish uchun alohida model — faqat shu yerda o'zgaradi, qolgan loyihaga tegmaydi.
+const VISION_MODEL = "gemini-2.5-flash";
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const model = getGenAI().getGenerativeModel({
-    model: "gemini-2.5-flash",
+// Tool'lar bilan model — generateReply va generateReplyWithImage uchun umumiy
+function buildToolModel(memory: UserMemory, mode: "text" | "voice", modelId: string = TEXT_MODEL) {
+  return getGenAI().getGenerativeModel({
+    model: modelId,
     systemInstruction: buildSystemPrompt(memory, mode),
     tools: [
       { functionDeclarations: [
@@ -775,33 +881,36 @@ export async function generateReply(
         getWeatherTool, sendMessageTool, sendVoiceMessageTool,
         getCalendarTool, addCalendarEventTool,
         readSheetTool, appendSheetTool, updateSheetTool,
+        getCurrencyTool, summarizeUrlTool, getTokenUsageTool,
       ]},
     ] as any,
-    // Tool calls don't benefit from thinking — disable to save tokens
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
   });
+}
 
-  // Oxirgi 6 xabar (3 almashuv) — kontekst uchun yetarli, ortiqcha token sarflanmaydi
-  // Gemini SDK: history har doim "user" bilan boshlanishi kerak
+// Gemini SDK: history har doim "user" bilan boshlanishi kerak
+function safeChatHistory(history: ChatMessage[]) {
   const rawHistory = trimHistory(history).slice(-6);
-  const safeHistory = rawHistory.length > 0 && rawHistory[0].role !== "user"
+  return rawHistory.length > 0 && rawHistory[0].role !== "user"
     ? rawHistory.slice(1)
     : rawHistory;
-  const chat = model.startChat({ history: safeHistory });
+}
 
-  let result = await withRetry(() =>
-    withTimeout(chat.sendMessage(safeText), GEMINI_TIMEOUT_MS)
-  );
+// Tool loop: max 3 iteratsiya — ko'p qadamli so'rovlar uchun. Tool chaqirilmasa darhol to'xtaydi.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function runToolLoop(chat: any, firstResult: any, userId: number): Promise<string> {
+  let result = firstResult;
+  const MAX_TOOL_ROUNDS = 3;
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const calls = result.response.functionCalls();
+    console.log(`[Gemini:tools] round ${round + 1}: ${calls?.length ? calls.map((c: { name: string }) => c.name).join(", ") : "tool chaqirilmadi"}`);
+    if (!calls?.length) break;
 
-  // Tool loop: max 1 marta — shaxsiy assistant uchun 1 tool call yetarli
-  const calls = result.response.functionCalls();
-  console.log(`[Gemini:tools] ${calls?.length ? calls.map(c => c.name).join(", ") : "tool chaqirilmadi"}`);
-  if (calls?.length) {
     const toolResults = await Promise.all(
-      calls.map(async (call) => {
+      calls.map(async (call: { name: string; args: Record<string, unknown> }) => {
         let toolResult: string;
         try {
-          toolResult = await handleTool(call.name, call.args as Record<string, unknown>, userId);
+          toolResult = await handleTool(call.name, call.args, userId);
         } catch (err) {
           console.error(`Tool "${call.name}" xatosi:`, err);
           toolResult = `Xatolik: ${err instanceof Error ? err.message : String(err)}`;
@@ -814,10 +923,56 @@ export async function generateReply(
     );
   }
 
-  logTokenUsage("reply", result.response as any);
+  logTokenUsage("reply", result.response);
   try {
     return result.response.text() || "Bajarildi.";
   } catch {
     return "Vazifa bajarildi, lekin matnli javob yaratilmadi.";
   }
+}
+
+export async function generateReply(
+  userText: string,
+  history: ChatMessage[],
+  memory: UserMemory,
+  userId: number,
+  mode: "text" | "voice" = "text"
+): Promise<string> {
+  const safeText = userText.length > 2000 ? userText.slice(0, 2000) + "…" : userText;
+  const chat = buildToolModel(memory, mode).startChat({ history: safeChatHistory(history) });
+  const result = await withRetry(() =>
+    withTimeout(chat.sendMessage(safeText), GEMINI_TIMEOUT_MS)
+  );
+  return runToolLoop(chat, result, userId);
+}
+
+// Rasm + (ixtiyoriy) izoh → tool'lar bilan javob. Chek/mahsulot rasmlari
+// system prompt qoidalariga ko'ra avtomatik tegishli Sheets jadvaliga yoziladi.
+export async function generateReplyWithImage(
+  imageBase64: string,
+  mimeType: string,
+  caption: string,
+  history: ChatMessage[],
+  memory: UserMemory,
+  userId: number,
+  mode: "text" | "voice" = "text"
+): Promise<string> {
+  // Rasm o'qish faqat VISION_MODEL bilan — matn yo'liga bog'liq emas
+  const chat = buildToolModel(memory, mode, VISION_MODEL).startChat({ history: safeChatHistory(history) });
+
+  const promptText = caption.trim()
+    ? caption.trim()
+    : "Bu rasmni tahlil qil. Agar bu chek/kvitansiya yoki xarajat bo'lsa — summasini 'Xarajatlar' jadvaliga yoz. " +
+      "Agar mahsulot/tovar narxi bo'lsa — 'Mahsulotlar' jadvaliga yoz. Aks holda rasmda nima borligini qisqa va aniq tushuntir.";
+
+  const result = await withRetry(() =>
+    withTimeout(
+      chat.sendMessage([
+        { inlineData: { mimeType, data: imageBase64 } },
+        { text: promptText },
+      ]),
+      GEMINI_TIMEOUT_MS
+    )
+  );
+  return runToolLoop(chat, result, userId);
 }

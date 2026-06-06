@@ -1,9 +1,10 @@
 import express, { type Request, type Response } from "express";
 import { Receiver } from "@upstash/qstash";
-import { handleMessage, handleCallbackQuery, isAllowed, balanceMarkdown, sendMessage } from "./bot";
-import { clearDeliveredReminder } from "./redis";
+import { handleMessage, handleCallbackQuery, isAllowed, balanceMarkdown, sendMessage, sendMessageHtml } from "./bot";
+import { clearDeliveredReminder, markUpdateProcessed } from "./redis";
 import type { TelegramUpdate, ReminderPayload } from "./types";
 import { generateDailyAINews } from "./gemini";
+import { generateMorningBriefing } from "./briefing";
 import { getMemory } from "./memory";
 
 const app = express();
@@ -22,6 +23,12 @@ app.use((req: Request, _res: Response, next) => {
     }
     next();
   });
+});
+
+// ─── Health check — Cloud Run uptime / cold-start tekshiruvi uchun ────────────
+
+app.get("/", (_req: Request, res: Response) => {
+  res.status(200).json({ ok: true, service: "shahriyor-assist" });
 });
 
 // ─── Telegram helpers ─────────────────────────────────────────────────────────
@@ -76,7 +83,22 @@ app.post("/webhook", async (req: Request, res: Response) => {
   }
 
   const update = req.body as TelegramUpdate;
-  
+
+  // Telegram qayta yuborishidan himoya — har update_id faqat bir marta ishlov ko'radi.
+  // 200 ni darhol qaytarib Telegram'ni tinchlantiramiz, ishlov fonda davom etadi.
+  if (typeof update?.update_id === "number") {
+    let isNew = true;
+    try {
+      isNew = await markUpdateProcessed(update.update_id);
+    } catch (err) {
+      console.warn("[webhook] dedup tekshiruvi xato (davom etamiz):", err);
+    }
+    if (!isNew) {
+      res.status(200).end("OK (duplicate)");
+      return;
+    }
+  }
+
   try {
     if (update?.message) {
       await handleMessage(update.message);
@@ -182,11 +204,54 @@ app.post("/api/cron/daily-ai-news", async (req: Request, res: Response) => {
     const memory = await getMemory(userId);
     const digest = await generateDailyAINews(memory);
 
-    await sendMessage(userId, digest);
+    await sendMessageHtml(userId, digest);
     console.log(`[cron:daily-news] Successfully delivered daily AI news to user: ${userId}`);
     res.status(200).json({ ok: true });
   } catch (err) {
     console.error("[cron:daily-news] Xatolik yuz berdi:", err);
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ─── /api/cron/morning-briefing — QStash daily morning cron ───────────────────
+
+app.post("/api/cron/morning-briefing", async (req: Request, res: Response) => {
+  const rawBody = (req as Request & { rawBody: string }).rawBody;
+
+  const receiver = new Receiver({
+    currentSigningKey: process.env.QSTASH_CURRENT_SIGNING_KEY!,
+    nextSigningKey: process.env.QSTASH_NEXT_SIGNING_KEY!,
+  });
+  try {
+    await receiver.verify({
+      signature: req.headers["upstash-signature"] as string,
+      body: rawBody,
+    });
+  } catch {
+    res.status(401).end("Unauthorized");
+    return;
+  }
+
+  const { userId } = req.body as { userId?: number };
+  if (!userId) {
+    res.status(400).end("Bad Request: userId is required");
+    return;
+  }
+  if (!isAllowed(userId)) {
+    console.warn(`[cron:briefing] Unauthorized access blocked for user: ${userId}`);
+    res.status(403).end("Forbidden");
+    return;
+  }
+
+  console.log(`[cron:briefing] Generating morning briefing for user: ${userId}`);
+
+  try {
+    const briefing = await generateMorningBriefing(userId);
+    await sendMessage(userId, briefing);
+    console.log(`[cron:briefing] Delivered morning briefing to user: ${userId}`);
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error("[cron:briefing] Xatolik:", err);
     res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 });

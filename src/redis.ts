@@ -23,6 +23,71 @@ export function getRedis(): Redis {
   return _redis;
 }
 
+// ─── Token usage tracking (AI xarajat hisoboti) ──────────────────────────────
+// Shaxsiy bot — global hisoblagich (userId kerak emas). Kunlik va oylik yig'indi.
+
+export interface TokenUsage {
+  prompt: number;
+  output: number;
+  thinking: number;
+  total: number;
+  calls: number;
+}
+
+// Toshkent vaqti bo'yicha sana (YYYY-MM-DD) — en-CA formati shu ko'rinishni beradi
+function tashkentDay(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Tashkent" });
+}
+function tashkentMonth(): string {
+  return tashkentDay().slice(0, 7); // YYYY-MM
+}
+
+const tokenDayKey = () => `tokens:day:${tashkentDay()}`;
+const tokenMonthKey = () => `tokens:month:${tashkentMonth()}`;
+
+export async function recordTokenUsage(u: Omit<TokenUsage, "calls">): Promise<void> {
+  const r = getRedis();
+  const dayK = tokenDayKey();
+  const monthK = tokenMonthKey();
+  const p = r.pipeline();
+  for (const key of [dayK, monthK]) {
+    p.hincrby(key, "prompt", u.prompt);
+    p.hincrby(key, "output", u.output);
+    p.hincrby(key, "thinking", u.thinking);
+    p.hincrby(key, "total", u.total);
+    p.hincrby(key, "calls", 1);
+  }
+  p.expire(dayK, 60 * 24 * 60 * 60);    // 60 kun
+  p.expire(monthK, 400 * 24 * 60 * 60); // ~13 oy
+  await p.exec();
+}
+
+export async function getTokenUsage(period: "day" | "month"): Promise<TokenUsage> {
+  const key = period === "day" ? tokenDayKey() : tokenMonthKey();
+  const data = (await getRedis().hgetall<Record<string, string | number>>(key)) ?? {};
+  const num = (v: string | number | undefined) => Number(v ?? 0) || 0;
+  return {
+    prompt: num(data.prompt),
+    output: num(data.output),
+    thinking: num(data.thinking),
+    total: num(data.total),
+    calls: num(data.calls),
+  };
+}
+
+// ─── Webhook deduplication (Telegram qayta yuborishidan himoya) ───────────────
+// Telegram webhook 60s da javob kelmasa xabarni qayta yuboradi. Uzun ovozli
+// pipeline (transkripsiya + AI + TTS) shu limitdan oshsa bot bir so'rovga ikki
+// marta javob beradi. update_id ni Redis'da NX bilan belgilab, takrorni bloklaymiz.
+
+const updateKey = (updateId: number) => `tg:update:${updateId}`;
+
+export async function markUpdateProcessed(updateId: number): Promise<boolean> {
+  // set NX → birinchi marta "OK", takror chaqiruvda null qaytadi
+  const res = await getRedis().set(updateKey(updateId), "1", { nx: true, ex: 300 });
+  return res === "OK";
+}
+
 // ─── Chat History ─────────────────────────────────────────────────────────────
 
 const HISTORY_LIMIT = 10;

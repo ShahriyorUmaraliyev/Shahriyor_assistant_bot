@@ -60,6 +60,10 @@ export async function downloadVoice(
 
 // ─── 2. Audio Input: OGG → matn (transcription) ──────────────────────────────
 
+// Transkripsiya odatda 2-5s oladi. Voice pipeline (transkripsiya + AI + TTS) Cloud Run
+// 300s limitiga sig'ishi uchun bu bosqichni cheklaymiz: 30s timeout + 1 retry.
+const TRANSCRIBE_TIMEOUT_MS = 30_000;
+
 export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
   const model = getGenAI().getGenerativeModel({ model: "gemini-2.5-flash" });
   const result = await withRetry(() =>
@@ -82,8 +86,9 @@ export async function transcribeVoice(audioBuffer: Buffer): Promise<string> {
           },
         ],
       }),
-      GEMINI_TIMEOUT_MS
-    )
+      TRANSCRIBE_TIMEOUT_MS
+    ),
+    1 // faqat 1 marta qayta urinish — kechikishni cheklash uchun
   );
   const text = result.response.text().trim();
   if (!text) throw new Error("VOICE_TRANSCRIPTION_FAILED");
@@ -114,8 +119,21 @@ export async function textToSpeech(text: string): Promise<Buffer> {
     },
   });
 
+  // Umumiy TTS deadline — retry'lar Cloud Run 300s limitini yeb qo'ymasligi uchun.
+  // Transkripsiya (50s) + generateReply (50s) dan keyin TTS ga ~60s qoladi.
+  const TTS_TOTAL_BUDGET_MS = 60_000;
+  const ttsStart = Date.now();
+
   // finishReason:OTHER vaqtinchalik Gemini xatosi — to'liq tsikl 3 marta retry
   for (let attempt = 0; attempt <= 3; attempt++) {
+    // Byudjet tugagan bo'lsa — boshqa retry qilmaymiz
+    if (Date.now() - ttsStart > TTS_TOTAL_BUDGET_MS) {
+      console.error(`[TTS] Umumiy byudjet (${TTS_TOTAL_BUDGET_MS}ms) tugadi, to'xtatildi`);
+      throw new Error("TTS_NO_AUDIO");
+    }
+    // Qolgan byudjetga moslab har urinishga timeout beramiz
+    const remaining = Math.max(5_000, TTS_TOTAL_BUDGET_MS - (Date.now() - ttsStart));
+    const attemptTimeout = Math.min(GEMINI_TIMEOUT_MS, remaining);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let json: any;
     try {
@@ -133,7 +151,7 @@ export async function textToSpeech(text: string): Promise<Buffer> {
           }
           return res.json();
         })(),
-        GEMINI_TIMEOUT_MS
+        attemptTimeout
       );
     } catch (err) {
       const msg = (err as Error).message ?? "";

@@ -1,6 +1,7 @@
-import { TelegramClient } from "telegram";
+import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { CustomFile } from "telegram/client/uploads";
+import bigInt from "big-integer";
 import { wavToOgg } from "./convert";
 
 // ─── Client ───────────────────────────────────────────────────────────────────
@@ -52,24 +53,67 @@ function withDeadline<T>(promise: Promise<T>): Promise<T> {
   ]);
 }
 
+// ─── Qabul qiluvchini hal qilish ──────────────────────────────────────────────
+// GramJS telefon raqamini faqat u akkaunt kontaktlarida bo'lsa hal qiladi.
+// Username'siz odamlarga ham yuborish uchun: avval getEntity (kontaktda bo'lsa),
+// bo'lmasa raqamni ism bilan IMPORT qilamiz — entity ishonchli hal bo'ladi.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function resolveRecipient(client: TelegramClient, to: string, name?: string): Promise<any> {
+  // @username yoki son ID — GramJS o'zi hal qiladi
+  if (!to.startsWith("+")) return to;
+
+  // Telefon raqami — avval mavjud entity'ni qidiramiz (ortiqcha import qilmaslik uchun)
+  try {
+    return await client.getEntity(to);
+  } catch {
+    // Kontaktda yo'q — import qilamiz
+  }
+
+  try {
+    const res = await client.invoke(
+      new Api.contacts.ImportContacts({
+        contacts: [
+          new Api.InputPhoneContact({
+            clientId: bigInt(Date.now()),
+            phone: to,
+            firstName: name?.trim() || to,
+            lastName: "",
+          }),
+        ],
+      })
+    );
+    const user = res.users?.[0];
+    if (user) return user;
+  } catch (err) {
+    console.warn("[resolveRecipient] importContacts xato:", (err as Error).message);
+  }
+
+  // Oxirgi chora — raqamni to'g'ridan beramiz (GramJS o'zi urinib ko'radi)
+  return to;
+}
+
 // ─── Send message ─────────────────────────────────────────────────────────────
 
-export async function sendUserMessage(_uid: number, to: string, message: string): Promise<void> {
+export async function sendUserMessage(_uid: number, to: string, message: string, name?: string): Promise<void> {
   const client = await getClientInstance();
   await withDeadline(
-    client.sendMessage(to, { message })
+    (async () => {
+      const peer = await resolveRecipient(client, to, name);
+      await client.sendMessage(peer, { message });
+    })()
   );
 }
 
 // ─── Send voice message ───────────────────────────────────────────────────────
 
-export async function sendUserVoiceMessage(_uid: number, to: string, audioBuffer: Buffer): Promise<void> {
+export async function sendUserVoiceMessage(_uid: number, to: string, audioBuffer: Buffer, name?: string): Promise<void> {
   const client = await getClientInstance();
   await withDeadline(
     (async () => {
+      const peer = await resolveRecipient(client, to, name);
       const oggBuffer = await wavToOgg(audioBuffer);
       const file = new CustomFile("voice.ogg", oggBuffer.length, "", oggBuffer);
-      await client.sendFile(to, {
+      await client.sendFile(peer, {
         file,
         voiceNote: true,
         forceDocument: false,
