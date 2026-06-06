@@ -1,9 +1,8 @@
-// ─── Ertalabki brifing — kalendar + bugungi eslatmalar + ob-havo + dollar kursi ─
+// ─── Ertalabki brifing — kalendar + bugungi eslatmalar + ob-havo ──────────────
 // Gemini chaqiruvisiz, to'g'ridan yig'iladi (bepul, tez, ishonchli).
 import { getCalendarEvents } from "./gcalendar";
 import { getReminders } from "./reminder";
 import { getCurrentWeather } from "./weather";
-import { getRateValue } from "./currency";
 
 function tashkentDay(ms: number): string {
   return new Date(ms).toLocaleDateString("en-CA", { timeZone: "Asia/Tashkent" });
@@ -12,11 +11,10 @@ function tashkentDay(ms: number): string {
 export async function generateMorningBriefing(userId: number): Promise<string> {
   const city = process.env.BRIEFING_CITY || "Tashkent";
 
-  const [calendarRaw, reminders, weatherRaw, usdRate] = await Promise.all([
+  const [calendarRaw, reminders, weatherRaw] = await Promise.all([
     getCalendarEvents(1).catch(() => ""),
     getReminders(userId).catch(() => []),
     getCurrentWeather(city).catch(() => ""),
-    getRateValue("USD").catch(() => null),
   ]);
 
   const today = new Date().toLocaleDateString("uz-UZ", {
@@ -36,11 +34,6 @@ export async function generateMorningBriefing(userId: number): Promise<string> {
     lines.push(`🌤 *Ob-havo (${w.shahar}):* ${w.harorat}, ${w.holat}, namlik ${w.namlik}`);
   } catch {
     /* ob-havo yo'q yoki xato — tashlab ketamiz */
-  }
-
-  // Dollar kursi
-  if (usdRate) {
-    lines.push(`💵 *Dollar:* 1$ = ${Math.round(usdRate).toLocaleString("ru-RU")} so'm`);
   }
 
   lines.push("");

@@ -6,7 +6,6 @@ import { sendUserMessage, sendUserVoiceMessage } from "./userclient";
 import { getCalendarEvents, addCalendarEvent } from "./gcalendar";
 import { readSheet, appendSheetRow, updateSheetCell } from "./gsheets";
 import { getCurrentWeather, getForecastWeather } from "./weather";
-import { getCurrencyRate, getRateValue } from "./currency";
 import { recordTokenUsage, getTokenUsage } from "./redis";
 
 // Gemini API client — lazy singleton (audio.ts ham shu instansni ishlatadi)
@@ -135,7 +134,7 @@ FARQ (MUHIM):
   return `Shahriyor Umaraliyevning shaxsiy AI assistantisman. Parfyumeriya/kosmetika biznesi, Toshkent. Bugun: ${today} (UTC+5).
 TIL: O'zbek (foydalanuvchi boshqa tilda yozsa — o'sha tilda). USLUB: qisqa, aniq.
 ${modeNote}
-QOBILIYAT: Matn/ovoz qabul + yuborish. Ob-havo, eslatmalar, kontaktlar, xabar yuborish, Google Calendar (taqvim), Google Sheets (jadval), valyuta kursi (so'mga aylantirish), havola (URL) xulosasi. Real vaqt yangiliklari uchun /search.
+QOBILIYAT: Matn/ovoz qabul + yuborish. Ob-havo, eslatmalar, kontaktlar, xabar yuborish, Google Calendar (taqvim), Google Sheets (jadval), havola (URL) xulosasi. Real vaqt yangiliklari uchun /search.
 XOTIRA:\n${compactMemory(memory)}
 QOIDALAR:
 - kontakt/narx/tavsif → update_memory
@@ -148,7 +147,6 @@ QOIDALAR:
 - biznes XARAJAT hisoboti ("xarajatlarim", "bugungi/shu oygi xarajat", "qancha sarfladim", "harajatlar qanday") → read_sheet("Xarajatlar!A:E") bilan o'qib, kerakli davr bo'yicha summalarni QO'SHIB ber. Bu AI token EMAS!
 - mahsulot/sotuv hisoboti ("mahsulotlarim", "nima sotdim") → read_sheet("Mahsulotlar!A:E")
 - FAQAT AI token sarfi ("token", "AI xarajati", "API narxi") → get_token_usage
-- valyuta kursi / so'mga aylantirish → get_currency_rate (dollar, evro, rubl va h.k.)
 - foydalanuvchi havola (http/https URL) yuborsa yoki "shu linkni qisqartir" desa → summarize_url ni DARHOL chaqir
 - taqvim ko'rish/qo'shish → get_calendar / add_calendar_event | end yo'q bo'lsa: start + 1 soat
 - jadval o'qish → read_sheet | jadvalga yozish → append_sheet | katak yangilash → update_sheet_cell
@@ -428,28 +426,6 @@ export const updateSheetTool = {
   },
 };
 
-export const getCurrencyTool = {
-  name: "get_currency_rate",
-  description:
-    "O'zbekiston Markaziy banki bo'yicha valyuta kursini olish va so'mga aylantirish. " +
-    "\"Bugungi dollar kursi\", \"1000 dollar necha so'm\", \"evro qancha\", \"500 rubl so'mda\" " +
-    "kabi so'rovlarda DARHOL chaqiring.",
-  parameters: {
-    type: SchemaType.OBJECT,
-    properties: {
-      currency: {
-        type: SchemaType.STRING,
-        description: 'Valyuta kodi yoki nomi. Misol: "USD", "EUR", "RUB", "dollar", "evro", "rubl"',
-      },
-      amount: {
-        type: SchemaType.NUMBER,
-        description: "Aylantiriladigan miqdor. Faqat kurs so'ralsa 1 qoldiring. Misol: 1000",
-      },
-    },
-    required: ["currency"],
-  },
-};
-
 export const summarizeUrlTool = {
   name: "summarize_url",
   description:
@@ -605,10 +581,6 @@ export async function handleTool(
     const { range, value } = args as { range: string; value: string };
     return await updateSheetCell(range, value);
   }
-  if (name === "get_currency_rate") {
-    const { currency, amount } = args as { currency: string; amount?: number };
-    return await getCurrencyRate(currency, typeof amount === "number" ? amount : 1);
-  }
   if (name === "summarize_url") {
     const { url } = args as { url: string };
     const { summarizeUrl } = await import("./websummary");
@@ -626,11 +598,7 @@ export async function handleTool(
       (u.prompt / 1_000_000) * PRICE_IN +
       ((u.output + u.thinking) / 1_000_000) * PRICE_OUT;
 
-    const usdRate = await getRateValue("USD"); // 1 USD necha so'm
     const fmtUsd = `$${costUsd.toFixed(costUsd < 0.01 ? 5 : 4)}`;
-    const fmtSom = usdRate
-      ? `${Math.round(costUsd * usdRate).toLocaleString("ru-RU")} so'm`
-      : "kurs olinmadi";
 
     return JSON.stringify({
       davr: period === "day" ? "Bugun" : "Shu oy",
@@ -638,7 +606,7 @@ export async function handleTool(
       kirish_token: u.prompt.toLocaleString("ru-RU"),
       chiqish_token: (u.output + u.thinking).toLocaleString("ru-RU"),
       jami_token: u.total.toLocaleString("ru-RU"),
-      taxminiy_xarajat: `${fmtUsd} (~${fmtSom})`,
+      taxminiy_xarajat: fmtUsd,
       eslatma: "Narx taxminiy — Gemini Flash standart tarifiga asoslangan.",
     });
   }
@@ -885,7 +853,7 @@ function buildToolModel(memory: UserMemory, mode: "text" | "voice", modelId: str
         getWeatherTool, sendMessageTool, sendVoiceMessageTool,
         getCalendarTool, addCalendarEventTool,
         readSheetTool, appendSheetTool, updateSheetTool,
-        getCurrencyTool, summarizeUrlTool, getTokenUsageTool,
+        summarizeUrlTool, getTokenUsageTool,
       ]},
     ] as any,
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
