@@ -1,27 +1,29 @@
-// ─── Valyuta kursi — O'zbekiston Markaziy banki (cbu.uz) bepul API ────────────
-// API kalit kerak emas. Rate = Nominal birlik uchun UZS narxi (masalan JPY: Nominal=100).
+// ─── Valyuta kursi — ikki manbali (rezerv bilan) ─────────────────────────────
+// 1) cbu.uz — O'zbekiston Markaziy banki (rasmiy, aniq). Cloud Run'dan ba'zan
+//    yetib bormaydi (geo/sekin), shuning uchun:
+// 2) open.er-api.com — global rezerv (kalit yo'q, hamma joydan ishonchli).
+// Ikkalasi ham UZS qaytaradi. Asosiy yiqilsa avtomatik rezervga o'tadi.
 
 interface CbuRate {
-  Ccy: string;        // "USD"
-  CcyNm_UZ: string;   // "AQSH dollari"
-  Nominal: string;    // "1" yoki "100"
-  Rate: string;       // "12650.50"
-  Date: string;       // "06.06.2026"
+  Ccy: string;
+  CcyNm_UZ: string;
+  Nominal: string;
+  Rate: string;
+  Date: string;
 }
 
 const CBU_URL = "https://cbu.uz/uz/arkhiv-kursov-valyut/json";
+const ERAPI_URL = "https://open.er-api.com/v6/latest";
 const TIMEOUT_MS = 10_000;
-// Ba'zi serverlar Node'ning standart User-Agent'ini rad etadi — browser UA beramiz
-const CBU_HEADERS = {
+const HEADERS = {
   "User-Agent": "Mozilla/5.0 (compatible; ShahriyorAssist/1.0)",
   Accept: "application/json",
 };
 
-// Keng tarqalgan nomlarni ISO kodga moslashtirish
 const ALIAS: Record<string, string> = {
   dollar: "USD", доллар: "USD", доллор: "USD", aqsh: "USD",
   yevro: "EUR", evro: "EUR", euro: "EUR", евро: "EUR",
-  rubl: "RUB", рубль: "RUB", rubль: "RUB", rossiya: "RUB",
+  rubl: "RUB", рубль: "RUB", rossiya: "RUB",
   funt: "GBP", yuan: "CNY", xitoy: "CNY", tenge: "KZT", tenga: "KZT",
   lira: "TRY", turk: "TRY", dirham: "AED",
 };
@@ -32,63 +34,78 @@ function normalizeCode(input: string): string {
   return input.trim().toUpperCase().slice(0, 3);
 }
 
-// Raqamli kurs (1 birlik uchun UZS). Xato bo'lsa null — chaqiruvchi shunga qarab ish ko'radi.
-export async function getRateValue(code: string): Promise<number | null> {
+async function fetchJson(url: string): Promise<unknown | null> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(`${CBU_URL}/${normalizeCode(code)}/`, { signal: ctrl.signal, headers: CBU_HEADERS });
-    if (!res.ok) { console.warn(`[currency] getRateValue HTTP ${res.status}`); return null; }
-    const data = (await res.json()) as CbuRate[];
-    const item = data?.[0];
-    if (!item) return null;
-    const rate = parseFloat(item.Rate);
-    const nominal = parseInt(item.Nominal, 10) || 1;
-    return isFinite(rate) ? rate / nominal : null;
+    const res = await fetch(url, { signal: ctrl.signal, headers: HEADERS });
+    if (!res.ok) {
+      console.warn(`[currency] HTTP ${res.status} — ${url}`);
+      return null;
+    }
+    return await res.json();
   } catch (err) {
-    console.warn("[currency] getRateValue xato:", (err as Error).message);
+    console.warn(`[currency] fetch xato (${url}):`, (err as Error).message);
     return null;
   } finally {
     clearTimeout(timer);
   }
 }
 
-export async function getCurrencyRate(currency: string, amount = 1): Promise<string> {
-  const code = normalizeCode(currency);
+interface RateInfo {
+  perUnit: number; // 1 birlik uchun UZS
+  ccy: string;
+  name: string;
+  date: string;
+  source: "cbu" | "erapi";
+}
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-
-  let res: Response;
-  try {
-    res = await fetch(`${CBU_URL}/${code}/`, { signal: ctrl.signal, headers: CBU_HEADERS });
-  } catch (err) {
-    if ((err as Error).name === "AbortError") return "Valyuta kursi olishda vaqt tugadi (8s). Qayta urinib ko'ring.";
-    return "Markaziy bank xizmatiga ulanishda tarmoq xatosi. Qayta urinib ko'ring.";
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!res.ok) return `Valyuta kursi xizmati xatosi: ${res.status}.`;
-
-  const data = (await res.json()) as CbuRate[];
-  if (!Array.isArray(data) || !data.length)
-    return `"${currency}" valyutasi topilmadi. ISO kod kiriting (USD, EUR, RUB, GBP, CNY, KZT, TRY...).`;
-
-  const item = data[0];
+// 1-manba: cbu.uz (rasmiy)
+async function fetchCbu(code: string): Promise<RateInfo | null> {
+  const data = await fetchJson(`${CBU_URL}/${code}/`);
+  if (!Array.isArray(data) || !data.length) return null;
+  const item = data[0] as CbuRate;
   const rate = parseFloat(item.Rate);
   const nominal = parseInt(item.Nominal, 10) || 1;
-  if (!isFinite(rate)) return "Valyuta kursi noto'g'ri formatda qaytdi.";
+  if (!isFinite(rate)) return null;
+  return { perUnit: rate / nominal, ccy: item.Ccy, name: item.CcyNm_UZ, date: item.Date, source: "cbu" };
+}
 
-  const perUnit = rate / nominal;            // 1 birlik uchun UZS
-  const total = perUnit * (amount > 0 ? amount : 1);
+// 2-manba: open.er-api.com (global rezerv)
+async function fetchErApi(code: string): Promise<RateInfo | null> {
+  const data = (await fetchJson(`${ERAPI_URL}/${code}`)) as
+    | { result?: string; rates?: Record<string, number>; time_last_update_utc?: string }
+    | null;
+  const uzs = data?.rates?.UZS;
+  if (!data || data.result !== "success" || typeof uzs !== "number") return null;
+  const date = data.time_last_update_utc?.slice(5, 16) ?? "";
+  return { perUnit: uzs, ccy: code, name: code, date, source: "erapi" };
+}
 
-  const fmtUzs = (n: number) => Math.round(n).toLocaleString("ru-RU"); // bo'sh joy bilan ajratish
+async function resolveRate(code: string): Promise<RateInfo | null> {
+  return (await fetchCbu(code)) ?? (await fetchErApi(code));
+}
+
+// Raqamli kurs (1 birlik uchun UZS). Token hisoboti va boshqalar uchun.
+export async function getRateValue(code: string): Promise<number | null> {
+  const info = await resolveRate(normalizeCode(code));
+  return info ? info.perUnit : null;
+}
+
+export async function getCurrencyRate(currency: string, amount = 1): Promise<string> {
+  const code = normalizeCode(currency);
+  const info = await resolveRate(code);
+  if (!info)
+    return "Valyuta kursini hozir olib bo'lmadi (ikkala manba ham javob bermadi). Birozdan keyin qayta urinib ko'ring.";
+
+  const fmtUzs = (n: number) => Math.round(n).toLocaleString("ru-RU");
+  const qty = amount > 0 ? amount : 1;
 
   return JSON.stringify({
-    valyuta: `${item.Ccy} (${item.CcyNm_UZ})`,
-    kurs: `1 ${item.Ccy} = ${fmtUzs(perUnit)} so'm`,
-    miqdor: amount > 1 ? `${amount} ${item.Ccy} = ${fmtUzs(total)} so'm` : undefined,
-    sana: item.Date,
+    valyuta: `${info.ccy}${info.name !== info.ccy ? ` (${info.name})` : ""}`,
+    kurs: `1 ${info.ccy} = ${fmtUzs(info.perUnit)} so'm`,
+    miqdor: qty > 1 ? `${qty} ${info.ccy} = ${fmtUzs(info.perUnit * qty)} so'm` : undefined,
+    sana: info.date || undefined,
+    manba: info.source === "cbu" ? "Markaziy bank" : "open.er-api.com",
   });
 }
