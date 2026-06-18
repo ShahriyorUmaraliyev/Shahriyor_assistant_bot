@@ -111,6 +111,44 @@ export function balanceMarkdown(text: string): string {
   return finalStr;
 }
 
+// ─── Uzun xabarni Telegram limiti (4096) ostida bo'laklarga ajratish ──────────
+// Kesib tashlash O'RNIGA bo'lamiz — aks holda HTML/Markdown tegi o'rtasidan
+// kesilib parse buziladi va xabarning qolgani umuman yetib bormaydi.
+// Bo'lish chegaralari: avval paragraf (\n\n), keyin qator (\n), oxirgi chora — qattiq kesish.
+// Paragraf/qator bo'yicha bo'lingani uchun bir <a>...</a> teg hech qachon ikkiga bo'linmaydi.
+const TG_MAX = 4000; // 4096 limitidan xavfsiz marja
+
+function splitMessage(text: string, max: number = TG_MAX): string[] {
+  if (text.length <= max) return [text];
+
+  const chunks: string[] = [];
+  let current = "";
+
+  const flush = () => { if (current) { chunks.push(current); current = ""; } };
+
+  for (const para of text.split("\n\n")) {
+    const block = current ? `${current}\n\n${para}` : para;
+    if (block.length <= max) { current = block; continue; }
+
+    flush();
+    if (para.length <= max) { current = para; continue; }
+
+    // Paragrafning o'zi limitdan katta — qatorlarga bo'lamiz
+    let lineBuf = "";
+    for (const line of para.split("\n")) {
+      const lb = lineBuf ? `${lineBuf}\n${line}` : line;
+      if (lb.length <= max) { lineBuf = lb; continue; }
+      if (lineBuf) { chunks.push(lineBuf); lineBuf = ""; }
+      if (line.length <= max) { lineBuf = line; continue; }
+      // Bitta qator ham limitdan katta (juda kam holat) — qattiq kesamiz
+      for (let i = 0; i < line.length; i += max) chunks.push(line.slice(i, i + max));
+    }
+    current = lineBuf;
+  }
+  flush();
+  return chunks;
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 const allowedIds = new Set<number>(
@@ -179,16 +217,12 @@ export async function setupBotCommands(): Promise<void> {
   }).catch((err) => console.error("[setupBotCommands] xato:", err));
 }
 
-export async function sendMessage(
+async function sendMessageChunk(
   chatId: number,
-  text: string,
+  chunk: string,
   extra?: Record<string, unknown>
 ): Promise<void> {
-  let safeText = text;
-  if (safeText.length > 4000) {
-    safeText = safeText.slice(0, 4000) + "\n\n… (xabar uzunligi sababli qisqartirildi)";
-  }
-  const balancedText = balanceMarkdown(safeText);
+  const balancedText = balanceMarkdown(chunk);
   const base = { chat_id: chatId, text: balancedText, parse_mode: "Markdown", ...extra };
   let res = await tgFetch(`${TG}/sendMessage`, {
     method: "POST",
@@ -197,7 +231,7 @@ export async function sendMessage(
   });
   if (!res.ok) {
     // parse_mode xatosi bo'lsa — markdown'siz qayta urinish
-    const plain = { chat_id: chatId, text: safeText, ...extra };
+    const plain = { chat_id: chatId, text: chunk, ...extra };
     res = await tgFetch(`${TG}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -211,28 +245,41 @@ export async function sendMessage(
   }
 }
 
-// HTML rejimida yuborish — grounding/qidiruv natijalari uchun. Uzun Google URL'lari
-// MarkdownV1 da buziladi, HTML <a href> da esa barqaror "Havola" linki bo'lib chiqadi.
-export async function sendMessageHtml(
+export async function sendMessage(
   chatId: number,
-  html: string,
+  text: string,
   extra?: Record<string, unknown>
 ): Promise<void> {
-  let safe = html;
-  if (safe.length > 4000) {
-    safe = safe.slice(0, 4000) + "\n\n… (xabar qisqartirildi)";
+  // Uzun xabar — kesmaymiz, bo'laklab ketma-ket yuboramiz.
+  // reply_markup/keyboard kabi extra faqat OXIRGI bo'lakka biriktiriladi.
+  const chunks = splitMessage(text);
+  for (let i = 0; i < chunks.length; i++) {
+    const isLast = i === chunks.length - 1;
+    await sendMessageChunk(chatId, chunks[i], isLast ? extra : undefined);
   }
-  const base = { chat_id: chatId, text: safe, parse_mode: "HTML", disable_web_page_preview: true, ...extra };
+}
+
+// HTML rejimida yuborish — grounding/qidiruv natijalari uchun. Uzun Google URL'lari
+// MarkdownV1 da buziladi, HTML <a href> da esa barqaror "Havola" linki bo'lib chiqadi.
+async function sendMessageHtmlChunk(
+  chatId: number,
+  chunk: string,
+  extra?: Record<string, unknown>
+): Promise<void> {
+  const base = { chat_id: chatId, text: chunk, parse_mode: "HTML", disable_web_page_preview: true, ...extra };
   let res = await tgFetch(`${TG}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(base),
   });
   if (!res.ok) {
-    // HTML parse xatosi — teglarni tozalab oddiy matn sifatida qayta urinish
-    const plain = safe
-      .replace(/<a href="[^"]*">(.*?)<\/a>/g, "$1")
-      .replace(/<\/?[^>]+>/g, "");
+    // HTML parse xatosi — teglarni tozalab oddiy matn sifatida qayta urinish.
+    // Tugallangan <a>...</a> dan matnni olamiz, qolgan/ochiq teglarni butunlay olib tashlaymiz
+    // (aks holda buzilgan "<a href=..." matn bo'lib ko'rinib qoladi).
+    const plain = chunk
+      .replace(/<a [^>]*>(.*?)<\/a>/g, "$1")
+      .replace(/<\/?[a-z][^>]*>?/gi, "")
+      .replace(/<a\b[^>]*$/gi, "");
     const plainBody = { chat_id: chatId, text: plain, disable_web_page_preview: true, ...extra };
     res = await tgFetch(`${TG}/sendMessage`, {
       method: "POST",
@@ -244,6 +291,20 @@ export async function sendMessageHtml(
       console.error(`Telegram HTML xatosi: ${errText}`);
       throw new Error(`Telegram sendMessageHtml failed: ${errText}`);
     }
+  }
+}
+
+export async function sendMessageHtml(
+  chatId: number,
+  html: string,
+  extra?: Record<string, unknown>
+): Promise<void> {
+  // Uzun digest/qidiruv natijasi — kesmaymiz, paragraf bo'yicha bo'lib yuboramiz.
+  // Shunday qilib <a href> teglari hech qachon o'rtasidan kesilmaydi.
+  const chunks = splitMessage(html);
+  for (let i = 0; i < chunks.length; i++) {
+    const isLast = i === chunks.length - 1;
+    await sendMessageHtmlChunk(chatId, chunks[i], isLast ? extra : undefined);
   }
 }
 
@@ -500,9 +561,8 @@ export async function handleMessage(message: TelegramMessage): Promise<void> {
       lines.push("\n⚙️ *Ko'rsatmalar:* yo'q");
     }
 
-    let result = lines.join("\n");
-    if (result.length > 4000) result = result.slice(0, 4000) + "\n...";
-    await sendMessage(chatId, result);
+    // Uzun xotira kesilmaydi — sendMessage o'zi bo'laklarga ajratib yuboradi.
+    await sendMessage(chatId, lines.join("\n"));
     return;
   }
 
@@ -886,10 +946,7 @@ async function deliverReply(
   mode: "text" | "voice",
   userId?: number
 ): Promise<void> {
-  if (text.length > 4000) {
-    text = text.slice(0, 4000) + "\n\n… (xabar uzunligi sababli qisqartirildi)";
-  }
-
+  // Uzun javob kesilmaydi — sendMessage o'zi bo'laklarga ajratib yuboradi.
   if (mode !== "voice") {
     await sendMessage(chatId, text);
     return;

@@ -808,11 +808,12 @@ Sizning vazifangiz: Sun'iy Intellekt (AI/SI) sohasidagi bugungi eng so'nggi, eng
 Qoidalar:
 1. Sarlavha: "📰 *Bugungi Sun'iy Intellekt (SI) Yangiliklari Daigesti*" bo'lsin. Undan so'ng albatta bugungi sanani ko'rsating.
 2. Faqat tasdiqlangan va ishonchli manbalardan (OpenAI, Google, Anthropic, TechCrunch, Wired va hk) olingan eng so'nggi yangiliklarni bering.
-3. Har bir yangilikni alohida paragrafda, chiroyli qisqacha tavsifi (3-4 ta gap) bilan va o'qish uchun havola (link) qo'shilgan holda bering.
-4. Jami 3-5 ta eng yirik va eng qiziqarli yangilikni kiriting.
-5. Har bir yangilik tasdiqlanganligiga ishonch hosil qiling, mish-mishlarni yozmang.
-6. Linklar Google Search grounding metadata orqali avtomatik ravishda qo'shiladi. Siz o'z matningizda hech qanday soxta yoki qo'lda yozilgan havola yozmang.
-7. Uslub professional, jozibador va mutlaqo tushunarli bo'lsin.`,
+3. ANIQ 5 ta yangilik bering — ko'p ham, kam ham emas. Eng yirik va eng qiziqarlilarini tanlang.
+4. Har bir yangilik IXCHAM bo'lsin: faqat 2 ta gap (maksimum 50 so'z). Suvga bo'kkan uzun tavsif YOZMANG — qisqa va aniq.
+5. Har bir yangilik alohida paragrafda, oldida tartib raqami bilan (1. 2. 3. 4. 5.) bo'lsin.
+6. Har bir yangilik tasdiqlanganligiga ishonch hosil qiling, mish-mishlarni yozmang.
+7. Linklar Google Search grounding metadata orqali avtomatik ravishda qo'shiladi. Siz o'z matningizda hech qanday soxta yoki qo'lda yozilgan havola yozmang.
+8. Uslub professional, jozibador va ixcham bo'lsin. Jami xabar 5 ta qisqa yangilikdan oshmasin.`,
     tools: [{ googleSearch: {} }] as any,
     generationConfig: { thinkingConfig: { thinkingBudget: 0 } } as any,
   });
